@@ -14,7 +14,11 @@ from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
-from preparacion.websocket.utils import notify_preparacion_created
+from preparacion.websocket.utils import (
+    notify_preparacion_created,
+    notify_preparacion_updated,
+    notify_preparacion_deleted
+)
 import os
 
 
@@ -38,10 +42,10 @@ def create_tramite(request):
                     lista_docs = []
 
             # 2. Validaciones básicas
-            placa = data.get('placa')
-            tipo_vehiculo = data.get('tipo_vehiculo')
+            placa           = data.get('placa')
+            tipo_vehiculo   = data.get('tipo_vehiculo')
             departamento_id = data.get('departamento')
-            municipio_id = data.get('municipio')
+            municipio_id    = data.get('municipio')
 
             if not all([placa, tipo_vehiculo, departamento_id, municipio_id]):
                 return Response(
@@ -86,30 +90,26 @@ def create_tramite(request):
                         "url": archivo_obj.archivo.url
                     })
             
-            # 5. 🔥 Construir datos manualmente para WebSocket 🔥
+            # 5.Construir datos manualmente para WebSocket 🔥
             tramite_data = {
                 'id': tramite.id,
                 'placa': tramite.placa,
                 'tipo_vehiculo': tramite.tipo_vehiculo,
+                'departamento': tramite.departamento_id,
+                'municipio': tramite.municipio_id,
+                'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
+                'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
                 'estado': tramite.estado,
                 'paquete': tramite.paquete,
                 'lista_documentos': tramite.lista_documentos,
-                'usuario': {
-                    'id': tramite.usuario.id,
-                    'nombre': tramite.usuario.get_full_name() if hasattr(tramite.usuario, 'get_full_name') else str(tramite.usuario),
-                    'email': tramite.usuario.email
-                },
-                'departamento': {
-                    'id': tramite.departamento.id,
-                    'nombre': tramite.departamento.nombre
-                } if tramite.departamento else None,
-                'municipio': {
-                    'id': tramite.municipio.id,
-                    'nombre': tramite.municipio.nombre
-                } if tramite.municipio else None,
-                'fecha_creacion': tramite.fecha_creacion.isoformat() if hasattr(tramite, 'fecha_creacion') else None,
-                'fecha_actualizacion': tramite.fecha_actualizacion.isoformat() if hasattr(tramite, 'fecha_actualizacion') else None,
-                'archivos': archivos_subidos
+                'usuario': tramite.usuario.username if tramite.usuario else 'Sin asignar',
+                'documentos_completos': tramite.documentos_completos,
+                'documentos_completados': tramite.documentos_completados,
+                'total_documentos': tramite.total_documentos,
+                'created_at': tramite.created_at.isoformat(),
+                'updated_at': tramite.updated_at.isoformat(),
+                'archivos': archivos_subidos,
+                'total_archivos': len(archivos_subidos)
             }
             
             # 6. 🔥 NOTIFICAR VÍA WEBSOCKET 🔥
@@ -364,20 +364,18 @@ def update_tramite(request, pk):
                     "tipo": archivo_obj.tipo_archivo,
                     "tamaño": archivo_obj.tamaño,
                     "url": archivo_obj.archivo.url,
-                    "created_at": archivo_obj.created_at
+                    "created_at": archivo_obj.created_at.isoformat()
                 })
 
         # Obtener todos los archivos del trámite
-        todos_archivos = tramite.archivos.all().values(
-            'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'created_at'
-        )
+        todos_archivos = tramite.archivos.all()
         archivos_list = [{
-            "id": arch['id'],
-            "nombre": arch['nombre_original'],
-            "tipo": arch['tipo_archivo'],
-            "tamaño": arch['tamaño'],
-            "url": arch['archivo'],
-            "created_at": arch['created_at']
+            "id": arch.id,
+            "nombre": arch.nombre_original,
+            "tipo": arch.tipo_archivo,
+            "tamaño": arch.tamaño,
+            "url": arch.archivo.url,
+            "created_at": arch.created_at.isoformat()
         } for arch in todos_archivos]
 
         response_data = {
@@ -385,9 +383,33 @@ def update_tramite(request, pk):
             "placa": tramite.placa,
             "tipo_vehiculo": tramite.tipo_vehiculo,
             "estado": tramite.estado,
-            "created_at": tramite.created_at,
+            "created_at": tramite.created_at.isoformat(),
             "archivos": archivos_list
         }
+
+        # 🔥 NOTIFICAR VÍA WEBSOCKET - Trámite actualizado 🔥
+        tramite_data = {
+            'id': tramite.id,
+            'placa': tramite.placa,
+            'tipo_vehiculo': tramite.tipo_vehiculo,
+            'estado': tramite.estado,
+            'paquete': tramite.paquete,
+            'lista_documentos': tramite.lista_documentos,
+            'usuario': tramite.usuario.username if tramite.usuario else 'Sin asignar',
+            'departamento': tramite.departamento_id,
+            'municipio': tramite.municipio_id,
+            'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
+            'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
+            'documentos_completos': tramite.documentos_completos,
+            'documentos_completados': tramite.documentos_completados,
+            'total_documentos': tramite.total_documentos,
+            'created_at': tramite.created_at.isoformat(),
+            'updated_at': tramite.updated_at.isoformat(),
+            'archivos': archivos_list,
+            'total_archivos': len(archivos_list)
+        }
+        notify_preparacion_updated(tramite_data)
+
         return Response(response_data, status=status.HTTP_200_OK)
 
     except DatabaseError as e:
@@ -408,7 +430,16 @@ def update_tramite(request, pk):
 def delete_tramite(request, pk):
     try:
         tramite = get_object_or_404(Preparacion, pk=pk)
+
+        # Guardar datos antes de eliminar para la notificación WebSocket
+        tramite_id = tramite.id
+        tramite_placa = tramite.placa
+
         tramite.delete()
+
+        # 🔥 NOTIFICAR VÍA WEBSOCKET - Trámite eliminado 🔥
+        notify_preparacion_deleted(tramite_id, tramite_placa)
+
         return Response(
             {"message": "Tramite deleted successfully"},
             status=status.HTTP_204_NO_CONTENT

@@ -47,19 +47,24 @@ def notify_preparacion_updated(preparacion_data):
     print(f"✅ WebSocket: Notificación de actualización enviada - ID: {preparacion_data.get('id')}")
 
 
-def notify_preparacion_deleted(preparacion_id):
+def notify_preparacion_deleted(preparacion_id, placa=None):
     """
     Notifica a todos los clientes conectados que se eliminó una preparación
-    
+
     Args:
         preparacion_id (int): ID de la preparación eliminada
+        placa (str, optional): Placa del vehículo eliminado
     """
     channel_layer = get_channel_layer()
+    data = {'id': preparacion_id}
+    if placa:
+        data['placa'] = placa
+
     async_to_sync(channel_layer.group_send)(
         'preparacion_updates',
         {
             'type': 'preparacion_deleted',
-            'data': {'id': preparacion_id},
+            'data': data,
             'timestamp': get_timestamp()
         }
     )
