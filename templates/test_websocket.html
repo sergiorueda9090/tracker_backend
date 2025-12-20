@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prueba WebSocket - Django Channels</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        #chat-log {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f5f5f5;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .connection {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .received {
+            background-color: #cce5ff;
+            color: #004085;
+        }
+        .sent {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Prueba de Django Channels - WebSocket</h1>
+    
+    <div id="status" class="disconnected">
+        Estado: Desconectado
+    </div>
+
+    <div id="chat-log"></div>
+    
+    <input id="chat-message-input" type="text" placeholder="Escribe un mensaje...">
+    <button id="chat-message-submit">Enviar</button>
+
+    <script>
+        const chatLog = document.querySelector('#chat-log');
+        const messageInput = document.querySelector('#chat-message-input');
+        const submitButton = document.querySelector('#chat-message-submit');
+        const statusDiv = document.querySelector('#status');
+
+        // Conexión WebSocket
+        const chatSocket = new WebSocket(
+            'ws://' + window.location.host + '/ws/test/'
+        );
+
+        chatSocket.onopen = function(e) {
+            console.log('WebSocket conectado');
+            statusDiv.textContent = 'Estado: Conectado ✓';
+            statusDiv.className = 'connected';
+        };
+
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            console.log('Mensaje recibido:', data);
+            
+            let messageClass = 'received';
+            let messageText = '';
+            
+            if (data.type === 'connection_established') {
+                messageClass = 'connection';
+                messageText = data.message;
+            } else if (data.type === 'message') {
+                messageText = data.echo || data.message;
+            }
+            
+            chatLog.innerHTML += '<div class="message ' + messageClass + '">' + 
+                                 messageText + '</div>';
+            chatLog.scrollTop = chatLog.scrollHeight;
+        };
+
+        chatSocket.onclose = function(e) {
+            console.error('WebSocket cerrado');
+            statusDiv.textContent = 'Estado: Desconectado ✗';
+            statusDiv.className = 'disconnected';
+        };
+
+        chatSocket.onerror = function(e) {
+            console.error('Error en WebSocket:', e);
+        };
+
+        // Enviar mensaje
+        submitButton.onclick = function(e) {
+            const message = messageInput.value;
+            if (message) {
+                chatSocket.send(JSON.stringify({
+                    'message': message
+                }));
+                chatLog.innerHTML += '<div class="message sent">Enviado: ' + message + '</div>';
+                chatLog.scrollTop = chatLog.scrollHeight;
+                messageInput.value = '';
+            }
+        };
+
+        messageInput.onkeyup = function(e) {
+            if (e.keyCode === 13) {  // Enter
+                submitButton.click();
+            }
+        };
+
+        messageInput.focus();
+    </script>
+</body>
+</html>

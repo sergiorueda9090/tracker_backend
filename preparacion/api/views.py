@@ -14,6 +14,7 @@ from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from preparacion.websocket.utils import notify_preparacion_created
 import os
 
 
@@ -84,6 +85,35 @@ def create_tramite(request):
                         "nombre": archivo_obj.nombre_original,
                         "url": archivo_obj.archivo.url
                     })
+            
+            # 5. 🔥 Construir datos manualmente para WebSocket 🔥
+            tramite_data = {
+                'id': tramite.id,
+                'placa': tramite.placa,
+                'tipo_vehiculo': tramite.tipo_vehiculo,
+                'estado': tramite.estado,
+                'paquete': tramite.paquete,
+                'lista_documentos': tramite.lista_documentos,
+                'usuario': {
+                    'id': tramite.usuario.id,
+                    'nombre': tramite.usuario.get_full_name() if hasattr(tramite.usuario, 'get_full_name') else str(tramite.usuario),
+                    'email': tramite.usuario.email
+                },
+                'departamento': {
+                    'id': tramite.departamento.id,
+                    'nombre': tramite.departamento.nombre
+                } if tramite.departamento else None,
+                'municipio': {
+                    'id': tramite.municipio.id,
+                    'nombre': tramite.municipio.nombre
+                } if tramite.municipio else None,
+                'fecha_creacion': tramite.fecha_creacion.isoformat() if hasattr(tramite, 'fecha_creacion') else None,
+                'fecha_actualizacion': tramite.fecha_actualizacion.isoformat() if hasattr(tramite, 'fecha_actualizacion') else None,
+                'archivos': archivos_subidos
+            }
+            
+            # 6. 🔥 NOTIFICAR VÍA WEBSOCKET 🔥
+            notify_preparacion_created(tramite_data)
 
             return Response({
                 "id": tramite.id,
@@ -412,5 +442,73 @@ def delete_archivo(request, archivo_id):
     except Exception as e:
         return Response(
             {"error": f"Error al eliminar archivo: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, RolePermission(['admin'])])
+def get_tramite_history(request, pk):
+    try:
+        # 1. Obtener el trámite principal
+        tramite = get_object_or_404(Preparacion, pk=pk)
+        
+        # 2. Obtener historial del trámite (Tabla Preparacion)
+        preparacion_history = tramite.history.all().select_related('history_user')
+        
+        # 3. Obtener historial de todos los archivos asociados a este trámite
+        # Filtramos en la tabla de historia por el tramite_id
+        archivos_history = PreparacionArchivo.history.filter(tramite_id=pk).select_related('history_user')
+
+        timeline = []
+
+        # --- Procesar Historial de Preparación ---
+        for record in preparacion_history:
+            cambios = []
+            if record.prev_record:
+                delta = record.diff_against(record.prev_record)
+                for change in delta.changes:
+                    cambios.append({"campo": change.field, "anterior": change.old, "nuevo": change.new})
+            
+            timeline.append({
+                "fecha": record.history_date,
+                "usuario": record.history_user.username if record.history_user else "Sistema",
+                "entidad": "Trámite",
+                "evento": record.get_history_type_display(),
+                "descripcion": f"Cambio en datos del trámite {record.placa}",
+                "detalles": cambios,
+                "tipo": "tramite"
+            })
+
+        # --- Procesar Historial de Archivos ---
+        for arch_record in archivos_history:
+            cambios_arch = []
+            if arch_record.prev_record:
+                delta = arch_record.diff_against(arch_record.prev_record)
+                for change in delta.changes:
+                    cambios_arch.append({"campo": change.field, "anterior": change.old, "nuevo": change.new})
+
+            timeline.append({
+                "fecha": arch_record.history_date,
+                "usuario": arch_record.history_user.username if arch_record.history_user else "Sistema",
+                "entidad": "Archivo",
+                "evento": arch_record.get_history_type_display(),
+                "descripcion": f"Archivo: {arch_record.nombre_original}",
+                "detalles": cambios_arch,
+                "tipo": "archivo"
+            })
+
+        # 4. Ordenar toda la línea de tiempo por fecha descendente (lo más nuevo primero)
+        timeline.sort(key=lambda x: x['fecha'], reverse=True)
+
+        return Response({
+            "tramite_id": pk,
+            "placa_actual": tramite.placa,
+            "total_eventos": len(timeline),
+            "trazabilidad_completa": timeline
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"Error al generar trazabilidad: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

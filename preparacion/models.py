@@ -2,6 +2,7 @@ from django.db import models
 from user.models import User
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from simple_history.models import HistoricalRecords
 
 # Create your models here.
 
@@ -102,6 +103,12 @@ class Preparacion(models.Model):
         help_text="Fecha y hora de última actualización"
     )
 
+    history = HistoricalRecords(
+        table_name='history_preparacion',
+        verbose_name='Historial de Preparación',
+        related_name='historico'
+    )
+
     class Meta:
         db_table = "preparacion"
         verbose_name = "Trámite en Preparación"
@@ -175,6 +182,11 @@ class PreparacionArchivo(models.Model):
         help_text="Fecha y hora de carga"
     )
 
+    history = HistoricalRecords(
+        table_name='history_preparacion_archivos',
+        verbose_name='Historial de Archivo',
+        related_name='historico'
+    )
     class Meta:
         db_table = "preparacion_archivos"
         verbose_name = "Archivo de Trámite"
