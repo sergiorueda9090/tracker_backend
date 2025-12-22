@@ -130,6 +130,17 @@ class PreparacionConsumer(AsyncWebsocketConsumer):
             'timestamp': self.get_timestamp()
         }))
 
+    async def archivo_deleted(self, event):
+        """
+        Envía notificación cuando se elimina un archivo de un trámite
+        """
+        await self.send(text_data=json.dumps({
+            'type': 'archivo_deleted',
+            'data': event['data'],
+            'message': f"Archivo eliminado: {event['data'].get('nombre_archivo')}",
+            'timestamp': self.get_timestamp()
+        }))
+
     # ===== Helper Methods =====
     async def subscribe_to_preparacion(self, preparacion_id):
         """

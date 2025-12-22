@@ -93,7 +93,7 @@ def notify_preparacion_status_changed(preparacion_data):
 def notify_specific_preparacion(preparacion_id, event_type, data):
     """
     Notifica solo a los usuarios suscritos a un trámite específico
-    
+
     Args:
         preparacion_id (int): ID del trámite
         event_type (str): Tipo de evento
@@ -101,7 +101,7 @@ def notify_specific_preparacion(preparacion_id, event_type, data):
     """
     channel_layer = get_channel_layer()
     group_name = f'preparacion_{preparacion_id}'
-    
+
     async_to_sync(channel_layer.group_send)(
         group_name,
         {
@@ -111,3 +111,28 @@ def notify_specific_preparacion(preparacion_id, event_type, data):
         }
     )
     print(f"✅ WebSocket: Notificación específica enviada - Grupo: {group_name}")
+
+
+def notify_archivo_deleted(tramite_id, archivo_id, nombre_archivo):
+    """
+    Notifica cuando se elimina un archivo de un trámite
+
+    Args:
+        tramite_id (int): ID del trámite
+        archivo_id (int): ID del archivo eliminado
+        nombre_archivo (str): Nombre del archivo eliminado
+    """
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        'preparacion_updates',
+        {
+            'type': 'archivo_deleted',
+            'data': {
+                'tramite_id': tramite_id,
+                'archivo_id': archivo_id,
+                'nombre_archivo': nombre_archivo
+            },
+            'timestamp': get_timestamp()
+        }
+    )
+    print(f"✅ WebSocket: Notificación de eliminación de archivo - Trámite ID: {tramite_id}, Archivo ID: {archivo_id}")

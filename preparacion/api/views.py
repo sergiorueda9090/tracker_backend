@@ -17,7 +17,8 @@ from municipios.models import Municipio
 from preparacion.websocket.utils import (
     notify_preparacion_created,
     notify_preparacion_updated,
-    notify_preparacion_deleted
+    notify_preparacion_deleted,
+    notify_archivo_deleted
 )
 import os
 
@@ -458,6 +459,10 @@ def delete_archivo(request, archivo_id):
     try:
         archivo = get_object_or_404(PreparacionArchivo, pk=archivo_id)
 
+        # Guardar información antes de eliminar para notificación WebSocket
+        tramite_id = archivo.tramite_id
+        nombre_archivo = archivo.nombre_original
+
         # Eliminar el archivo físico del sistema
         if archivo.archivo:
             if os.path.exists(archivo.archivo.path):
@@ -465,6 +470,9 @@ def delete_archivo(request, archivo_id):
 
         # Eliminar el registro de la base de datos
         archivo.delete()
+
+        # 🔥 NOTIFICAR VÍA WEBSOCKET - Archivo eliminado 🔥
+        notify_archivo_deleted(tramite_id, archivo_id, nombre_archivo)
 
         return Response(
             {"message": "Archivo eliminado exitosamente"},
