@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'preparacion',
     'tracker',
     'finalizados',
+    'archivadas',
 ]
 
 MIDDLEWARE = [

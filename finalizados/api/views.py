@@ -457,3 +457,76 @@ def get_finalizado_history(request, pk):
             {"error": f"Error al generar trazabilidad: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ✅ Archivar trámite (mover de Finalizados a Archivadas)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RolePermission(['admin'])])
+def archivar_finalizado(request, pk):
+    """
+    Archiva un trámite finalizado y lo transfiere automáticamente al módulo Archivadas.
+
+    Flujo:
+    1. Cambia estado_modulo de 3 (Finalizados) a 0 (Archivadas)
+    2. Emite WebSocket a Finalizados (eliminación)
+    3. Emite WebSocket a Archivadas (creación)
+    """
+    try:
+        with transaction.atomic():
+            # 1. Obtener el trámite del módulo Finalizados
+            finalizado = get_object_or_404(Preparacion, pk=pk, estado_modulo=3)
+
+            # 2. Guardar datos del finalizado antes de la transición (para notificaciones)
+            finalizado_data_before = {
+                'id': finalizado.id,
+                'placa': finalizado.placa,
+            }
+
+            # 3. Realizar la transición de módulo
+            finalizado.estado_modulo = 0  # Mover a Archivadas
+            finalizado.save()
+
+            # 4. Construir datos completos para el módulo Archivadas (WebSocket)
+            archivada_data = {
+                'id': finalizado.id,
+                'placa': finalizado.placa,
+                'tipo_vehiculo': finalizado.tipo_vehiculo,
+                'departamento': finalizado.departamento_id,
+                'municipio': finalizado.municipio_id,
+                'nombre_depto': finalizado.departamento.departamento if finalizado.departamento else None,
+                'nombre_muni': finalizado.municipio.municipio if finalizado.municipio else None,
+                'estado': finalizado.estado,
+                'estado_detalle': finalizado.estado_detalle,
+                'fecha_recepcion_municipio': finalizado.fecha_recepcion_municipio.isoformat() if finalizado.fecha_recepcion_municipio else None,
+                'hace_dias': finalizado.hace_dias,
+                'proveedor_id': finalizado.proveedor_id,
+                'codigo_encargado': finalizado.codigo_encargado,
+                'proveedor_nombre': finalizado.proveedor.nombre if finalizado.proveedor else None,
+                'usuario': finalizado.usuario.username if finalizado.usuario else 'Sin asignar',
+                'created_at': finalizado.created_at.isoformat(),
+                'updated_at': finalizado.updated_at.isoformat(),
+            }
+
+            # 5. Emitir notificaciones WebSocket
+            # 5.1. Notificar al módulo Finalizados que el registro fue eliminado
+            notify_finalizado_deleted(finalizado_data_before['id'], finalizado_data_before['placa'])
+
+            # 5.2. Notificar al módulo Archivadas que se creó un nuevo registro
+            from archivadas.websocket.utils import notify_archivada_created
+            notify_archivada_created(archivada_data)
+
+            return Response({
+                "message": f"Trámite {finalizado.placa} archivado exitosamente",
+                "id": finalizado.id,
+                "placa": finalizado.placa,
+                "estado_modulo": finalizado.estado_modulo,
+            }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Error al archivar finalizado: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response(
+            {"error": f"Error al archivar el trámite: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
