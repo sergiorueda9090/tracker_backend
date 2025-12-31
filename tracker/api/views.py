@@ -9,12 +9,11 @@ from django.db import DatabaseError, transaction
 from django.db.models import Q, Subquery, OuterRef
 from datetime import datetime
 
-from tracker.models import Tracker
+from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
-from preparacion.models import Preparacion
 from tracker.websocket.utils import (
     notify_tracker_created,
     notify_tracker_updated,
@@ -44,7 +43,7 @@ def create_tracker(request):
                 )
 
             # 2.1. Validar que el tipo de vehículo sea válido
-            tipos_validos = [choice[0] for choice in Tracker.TIPO_VEHICULO_CHOICES]
+            tipos_validos = [choice[0] for choice in Preparacion.TIPO_VEHICULO_CHOICES]
             if tipo_vehiculo not in tipos_validos:
                 return Response(
                     {"error": f"Tipo de vehículo inválido. Valores permitidos: {', '.join(tipos_validos)}"},
@@ -73,14 +72,6 @@ def create_tracker(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 2.5. Validar preparación (opcional)
-            preparacion_id = data.get('preparacion', None)
-            if preparacion_id and not Preparacion.objects.filter(id=preparacion_id).exists():
-                return Response(
-                    {"error": f"La preparación con ID {preparacion_id} no existe."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
             # 3. Preparar fecha de recepción (convertir string a date)
             fecha_recepcion = None
             fecha_str = data.get('fecha_recepcion_municipio', None)
@@ -93,18 +84,20 @@ def create_tracker(request):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-            # 4. Crear el trámite
-            tracker = Tracker.objects.create(
+            # 4. Crear el trámite (usando modelo Preparacion con estado_modulo=2)
+            tracker = Preparacion.objects.create(
                 usuario=request.user,
                 placa=placa.upper(),
                 tipo_vehiculo=tipo_vehiculo,
                 departamento_id=departamento_id,
                 municipio_id=municipio_id,
-                estado=data.get('estado', 'EN_RADICACION'),
+                estado=data.get('estado', 'en_radicacion'),  # Minúsculas
                 estado_detalle=data.get('estado_detalle', ''),
                 fecha_recepcion_municipio=fecha_recepcion,
                 proveedor_id=proveedor_id,
-                preparacion_id=preparacion_id
+                estado_modulo=2,  # CRÍTICO: Marca como módulo Tracker
+                paquete=data.get('paquete', ''),
+                lista_documentos=data.get('lista_documentos', [])
             )
 
             # 5. Construir datos para WebSocket
@@ -123,7 +116,6 @@ def create_tracker(request):
                 'proveedor_id': tracker.proveedor_id,
                 'codigo_encargado': tracker.codigo_encargado,
                 'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
-                'preparacion_id': tracker.preparacion_id,
                 'usuario': tracker.usuario.username if tracker.usuario else 'Sin asignar',
                 'created_at': tracker.created_at.isoformat(),
                 'updated_at': tracker.updated_at.isoformat(),
@@ -164,13 +156,13 @@ def list_trackers(request):
             id_municipio=OuterRef('municipio')
         ).values('municipio')[:1]
 
-        # 2. QuerySet Base con Annotation
-        trackers = Tracker.objects.select_related(
-            'usuario', 'departamento', 'municipio', 'proveedor', 'preparacion'
+        # 2. QuerySet Base con Annotation (filtrado por estado_modulo=2 para Tracker)
+        trackers = Preparacion.objects.select_related(
+            'usuario', 'departamento', 'municipio', 'proveedor'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery)
-        ).all()
+        ).filter(estado_modulo=2)  # CRÍTICO: Solo registros del módulo Tracker
 
         # --- Filtros ---
         # Filtro de búsqueda general
@@ -226,9 +218,26 @@ def list_trackers(request):
         # 3. Construir datos
         trackers_data = []
         for tracker in trackers.order_by('-created_at'):
+
+            # Obtener archivos del trámite
+            archivos = tracker.archivos.all().values(
+                'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'created_at'
+            )
+
+            archivos_list = [{
+                "id": arch['id'],
+                "nombre": arch['nombre_original'],
+                "tipo": arch['tipo_archivo'],
+                "tamaño": arch['tamaño'],
+                "url": arch['archivo'],
+                "created_at": arch['created_at']
+            } for arch in archivos]
+
             trackers_data.append({
                 'id': tracker.id,
                 'placa': tracker.placa,
+                'archivos': archivos_list,
+                'total_archivos': len(archivos_list),
                 'tipo_vehiculo': tracker.tipo_vehiculo,
                 'departamento': tracker.departamento_id,
                 'municipio': tracker.municipio_id,
@@ -236,12 +245,12 @@ def list_trackers(request):
                 'nombre_muni': tracker.nombre_muni,
                 'estado': tracker.estado,
                 'estado_detalle': tracker.estado_detalle,
+                'estado_tracker': tracker.estado_tracker,
                 'fecha_recepcion_municipio': tracker.fecha_recepcion_municipio,
                 'hace_dias': tracker.hace_dias,
                 'proveedor_id': tracker.proveedor_id,
                 'codigo_encargado': tracker.codigo_encargado,
                 'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
-                'preparacion_id': tracker.preparacion_id,
                 'usuario': tracker.usuario.username if tracker.usuario else 'Sin asignar',
                 'created_at': tracker.created_at,
                 'updated_at': tracker.updated_at,
@@ -264,7 +273,7 @@ def list_trackers(request):
 @permission_classes([IsAuthenticated, RolePermission(['admin'])])
 def get_tracker(request, pk):
     try:
-        tracker = get_object_or_404(Tracker, pk=pk)
+        tracker = get_object_or_404(Preparacion, pk=pk, estado_modulo=2)
 
         data = {
             "id": tracker.id,
@@ -273,12 +282,12 @@ def get_tracker(request, pk):
             "departamento": tracker.departamento_id,
             "municipio": tracker.municipio_id,
             "estado": tracker.estado,
+            "estado_tracker": tracker.estado_tracker,
             "estado_detalle": tracker.estado_detalle,
             "fecha_recepcion_municipio": tracker.fecha_recepcion_municipio,
             "hace_dias": tracker.hace_dias,
             "proveedor": tracker.proveedor_id,
             "codigo_encargado": tracker.codigo_encargado,
-            "preparacion": tracker.preparacion_id,
             "usuario": tracker.usuario.username if tracker.usuario else 'Sin asignar',
             "created_at": tracker.created_at,
             "updated_at": tracker.updated_at,
@@ -296,7 +305,7 @@ def get_tracker(request, pk):
 @permission_classes([IsAuthenticated, RolePermission(['admin'])])
 def update_tracker(request, pk):
     try:
-        tracker = get_object_or_404(Tracker, pk=pk)
+        tracker = get_object_or_404(Preparacion, pk=pk, estado_modulo=2)
 
         data = request.data
 
@@ -305,6 +314,7 @@ def update_tracker(request, pk):
         tracker.tipo_vehiculo = data.get('tipo_vehiculo', tracker.tipo_vehiculo)
         tracker.estado = data.get('estado', tracker.estado)
         tracker.estado_detalle = data.get('estado_detalle', tracker.estado_detalle)
+        tracker.estado_tracker = data.get('estado_tracker', tracker.estado_tracker)
 
         # Fecha de recepción
         if 'fecha_recepcion_municipio' in data:
@@ -321,8 +331,6 @@ def update_tracker(request, pk):
             tracker.municipio_id = data.get('municipio')
         if 'proveedor' in data:
             tracker.proveedor_id = data.get('proveedor')
-        if 'preparacion' in data:
-            tracker.preparacion_id = data.get('preparacion')
 
         tracker.save()
 
@@ -340,13 +348,13 @@ def update_tracker(request, pk):
             'placa': tracker.placa,
             'tipo_vehiculo': tracker.tipo_vehiculo,
             'estado': tracker.estado,
+            'estado_tracker': tracker.estado_tracker,
             'estado_detalle': tracker.estado_detalle,
             'fecha_recepcion_municipio': tracker.fecha_recepcion_municipio.isoformat() if tracker.fecha_recepcion_municipio else None,
             'hace_dias': tracker.hace_dias,
             'proveedor_id': tracker.proveedor_id,
             'codigo_encargado': tracker.codigo_encargado,
             'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
-            'preparacion_id': tracker.preparacion_id,
             'departamento': tracker.departamento_id,
             'municipio': tracker.municipio_id,
             'nombre_depto': tracker.departamento.departamento if tracker.departamento else None,
@@ -376,7 +384,7 @@ def update_tracker(request, pk):
 @permission_classes([IsAuthenticated, RolePermission(['admin'])])
 def delete_tracker(request, pk):
     try:
-        tracker = get_object_or_404(Tracker, pk=pk)
+        tracker = get_object_or_404(Preparacion, pk=pk, estado_modulo=2)
 
         # Guardar datos antes de eliminar para la notificación WebSocket
         tracker_id = tracker.id
@@ -404,7 +412,7 @@ def delete_tracker(request, pk):
 def get_tracker_history(request, pk):
     try:
         # 1. Obtener el trámite principal
-        tracker = get_object_or_404(Tracker, pk=pk)
+        tracker = get_object_or_404(Preparacion, pk=pk, estado_modulo=2)
 
         # 2. Obtener historial del trámite
         tracker_history = tracker.history.all().select_related('history_user')

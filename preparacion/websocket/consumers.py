@@ -14,7 +14,7 @@ class PreparacionConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         """
-        Se ejecuta cuando un cliente se conecta al WebSocket
+            Se ejecuta cuando un cliente se conecta al WebSocket
         """
         # Nombre del grupo para actualizaciones de preparación
         self.room_group_name = 'preparacion_updates'

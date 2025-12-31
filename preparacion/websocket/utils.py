@@ -136,3 +136,29 @@ def notify_archivo_deleted(tramite_id, archivo_id, nombre_archivo):
         }
     )
     print(f"✅ WebSocket: Notificación de eliminación de archivo - Trámite ID: {tramite_id}, Archivo ID: {archivo_id}")
+
+
+def notify_preparacion_sent_to_tracker(preparacion_id, placa, tracker_id):
+    """
+    Notifica cuando un trámite se envía de preparación a tracker
+
+    Args:
+        preparacion_id (int): ID del trámite en preparación
+        placa (str): Placa del vehículo
+        tracker_id (int): ID del nuevo registro en tracker
+    """
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        'preparacion_updates',
+        {
+            'type': 'preparacion_deleted',  # Lo eliminamos de la vista de preparación
+            'data': {
+                'id': preparacion_id,
+                'placa': placa,
+                'tracker_id': tracker_id,
+                'reason': 'enviado_tracker'
+            },
+            'timestamp': get_timestamp()
+        }
+    )
+    print(f"✅ WebSocket: Trámite enviado a Tracker - Preparación ID: {preparacion_id}, Tracker ID: {tracker_id}")

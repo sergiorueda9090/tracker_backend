@@ -18,7 +18,8 @@ from preparacion.websocket.utils import (
     notify_preparacion_created,
     notify_preparacion_updated,
     notify_preparacion_deleted,
-    notify_archivo_deleted
+    notify_archivo_deleted,
+    notify_preparacion_sent_to_tracker
 )
 import os
 
@@ -47,6 +48,7 @@ def create_tramite(request):
             tipo_vehiculo   = data.get('tipo_vehiculo')
             departamento_id = data.get('departamento')
             municipio_id    = data.get('municipio')
+            estado_modulo   = 1
 
             if not all([placa, tipo_vehiculo, departamento_id, municipio_id]):
                 return Response(
@@ -63,7 +65,8 @@ def create_tramite(request):
                 municipio_id=municipio_id,
                 estado=data.get('estado', 'en_verificacion'),
                 paquete=data.get('paquete', ''),
-                lista_documentos=lista_docs
+                lista_documentos=lista_docs,
+                estado_modulo=estado_modulo
             )
 
             # 4. Procesar archivos
@@ -157,7 +160,7 @@ def list_tramites(request):
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
             nombre_usuario=Subquery(nombre_usuario_subquery)
-        ).all()
+        ).all().filter(estado_modulo=1)
 
         # --- Filtro de Buscador (Search) ---
         search_query = request.query_params.get('search', None)
@@ -258,7 +261,7 @@ def list_tramites(request):
 def get_tramite(request, pk):
     try:
         tramite = get_object_or_404(Preparacion, pk=pk)
-
+        
         # Obtener archivos del trámite
         archivos = tramite.archivos.all().values(
             'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'created_at'
@@ -549,5 +552,87 @@ def get_tramite_history(request, pk):
     except Exception as e:
         return Response(
             {"error": f"Error al generar trazabilidad: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ✅ Enviar trámite al Tracker
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RolePermission(['admin'])])
+def send_to_tracker(request, pk):
+    """
+    Envía un trámite de preparación al módulo Tracker.
+
+    1. Cambia estado_modulo de 1 (Preparación) a 2 (Tracker)
+    2. Actualiza estado a 'en_radicacion'
+    3. Asigna proveedor si se proporciona
+    4. Notifica vía WebSocket a ambos módulos
+    """
+    try:
+        from tracker.websocket.utils import notify_tracker_created
+
+        with transaction.atomic():
+            # 1. Obtener el trámite de preparación
+            preparacion = get_object_or_404(Preparacion, pk=pk)
+
+            # 2. Validar que esté en preparación (estado_modulo=1)
+            if preparacion.estado_modulo != 1:
+                return Response(
+                    {"error": "Este trámite no está en el módulo de Preparación"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 3. Obtener datos adicionales para tracker
+            proveedor_id = request.data.get('proveedor')  # Opcional
+            fecha_recepcion = request.data.get('fecha_recepcion_municipio')  # Opcional
+
+            # 4. Actualizar a módulo Tracker
+            preparacion.estado_modulo = 2  # Cambiar a Tracker
+            #preparacion.estado         = 'en_radicacion'  # Estado inicial de tracker
+            preparacion.estado_tracker = 'en_radicacion'  # Estado específico de tracker
+            preparacion.proveedor_id = proveedor_id if proveedor_id else None
+
+            if fecha_recepcion:
+                preparacion.fecha_recepcion_municipio = datetime.strptime(fecha_recepcion, '%Y-%m-%d').date()
+
+            preparacion.save()
+
+            # 5. Preparar datos para WebSocket
+            tracker_data = {
+                'id': preparacion.id,
+                'placa': preparacion.placa,
+                'tipo_vehiculo': preparacion.tipo_vehiculo,
+                'departamento': preparacion.departamento_id,
+                'municipio': preparacion.municipio_id,
+                'nombre_depto': preparacion.departamento.departamento if preparacion.departamento else None,
+                'nombre_muni': preparacion.municipio.municipio if preparacion.municipio else None,
+                'estado_tracker': preparacion.estado_tracker,
+                'estado_detalle': preparacion.estado_detalle or '',
+                'fecha_recepcion_municipio': preparacion.fecha_recepcion_municipio.isoformat() if preparacion.fecha_recepcion_municipio else None,
+                'hace_dias': preparacion.hace_dias,
+                'proveedor_id': preparacion.proveedor_id,
+                'proveedor_nombre': preparacion.proveedor.nombre if preparacion.proveedor else None,
+                'codigo_encargado': preparacion.codigo_encargado,
+                'usuario': preparacion.usuario.username if preparacion.usuario else None,
+                'created_at': preparacion.created_at.isoformat(),
+                'updated_at': preparacion.updated_at.isoformat()
+            }
+
+            # 6. Notificar vía WebSocket
+            # Notificar a preparación que el trámite fue movido (eliminar de vista)
+            notify_preparacion_sent_to_tracker(preparacion.id, preparacion.placa, preparacion.id)
+
+            # Notificar a tracker que se creó un nuevo trámite
+            notify_tracker_created(tracker_data)
+
+            return Response({
+                "message": "Trámite enviado al Tracker exitosamente",
+                "preparacion_id": preparacion.id,
+                "tracker_data": tracker_data
+            }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"Error al enviar trámite al Tracker: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

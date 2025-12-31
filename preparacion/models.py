@@ -13,10 +13,22 @@ class Preparacion(models.Model):
 
     # Opciones de estado
     ESTADO_CHOICES = [
+        # Estados de Preparación
         ('en_verificacion', 'En Verificación'),
         ('para_radicacion', 'Para Radicación'),
         ('en_novedad', 'En Novedad'),
         ('enviado_tracker', 'Enviado a Tracker'),
+        # Estados de Tracker (cuando estado_modulo=2)
+        ('en_radicacion', 'En Radicación'),
+        ('con_novedad', 'Con Novedad'),
+        ('finalizado', 'Finalizado'),
+    ]
+
+    ESTADO_TRACKER = [
+        ('sin_tracker', 'Sin Tracker'),
+        ('en_radicacion', 'En Radicación'),
+        ('con_novedad', 'Con Novedad'),
+        ('finalizado', 'Finalizado'),
     ]
 
     # Opciones de tipo de vehículo
@@ -69,6 +81,17 @@ class Preparacion(models.Model):
         help_text="Municipio del trámite"
     )
 
+    # Proveedor (usado en módulo Tracker)
+    proveedor = models.ForeignKey(
+        'proveedores.Proveedor',
+        on_delete=models.PROTECT,
+        related_name='tramites_preparacion',
+        db_column='proveedor_id',
+        null=True,
+        blank=True,
+        help_text="Proveedor encargado del trámite (usado en módulo Tracker)"
+    )
+
     # Estado del trámite
     estado = models.CharField(
         max_length=20,
@@ -77,6 +100,40 @@ class Preparacion(models.Model):
         help_text="Estado actual del trámite"
     )
 
+    # Descripción detallada del estado (usado en módulo Tracker)
+    estado_detalle = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Descripción detallada del estado (alimentado por Proveedores en Tracker)"
+    )
+
+    # Fecha de recepción en municipio (usado en módulo Tracker)
+    fecha_recepcion_municipio = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Fecha de recepción en municipio (usado en módulo Tracker)"
+    )
+
+    # Estado del Modulo.
+    """
+        1. En preparcion
+        2. En Tracker
+        3. En Finalizados
+        0. Archivados
+    """
+    estado_modulo = models.IntegerField(
+        default=1,
+        help_text="Estado del módulo: 1-En preparación, 2-En Tracker, 3-En Finalizados, 0-Archivados"
+    )
+
+    # Estado específico para módulo Tracker
+    estado_tracker = models.CharField(
+        max_length=20,
+        choices=ESTADO_TRACKER,
+        default='sin_tracker',
+        help_text="Estado actual del trámite en módulo Tracker"
+    )
+    
     # Carpeta/paquete de archivos
     paquete = models.CharField(
         max_length=255,
@@ -117,8 +174,11 @@ class Preparacion(models.Model):
         indexes = [
             models.Index(fields=['placa'], name='idx_prep_placa'),
             models.Index(fields=['estado'], name='idx_prep_estado'),
+            models.Index(fields=['estado_modulo'], name='idx_prep_estado_modulo'),
             models.Index(fields=['departamento', 'municipio'], name='idx_prep_ubicacion'),
             models.Index(fields=['created_at'], name='idx_prep_fecha'),
+            models.Index(fields=['proveedor'], name='idx_prep_proveedor'),
+            models.Index(fields=['fecha_recepcion_municipio'], name='idx_prep_fecha_recep'),
         ]
 
     def __str__(self):
@@ -144,6 +204,23 @@ class Preparacion(models.Model):
         if not self.lista_documentos:
             return 0
         return len(self.lista_documentos)
+
+    @property
+    def hace_dias(self):
+        """
+        Calcula días desde fecha_recepcion_municipio (solo para módulo Tracker).
+        Retorna None si no hay fecha_recepcion_municipio.
+        """
+        if not self.fecha_recepcion_municipio:
+            return None
+        from django.utils import timezone
+        hoy = timezone.now().date()
+        return (hoy - self.fecha_recepcion_municipio).days
+
+    @property
+    def codigo_encargado(self):
+        """Retorna código del proveedor (solo para módulo Tracker)"""
+        return self.proveedor.codigo_encargado if self.proveedor else None
 
 
 class PreparacionArchivo(models.Model):
