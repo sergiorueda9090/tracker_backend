@@ -456,3 +456,86 @@ def get_tracker_history(request, pk):
             {"error": f"Error al generar trazabilidad: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ✅ Finalizar trámite (mover de Tracker a Finalizados)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, RolePermission(['admin'])])
+def finalizar_tracker(request, pk):
+    """
+    Finaliza un trámite en Tracker y lo transfiere automáticamente al módulo Finalizados.
+
+    Flujo:
+    1. Cambia estado_modulo de 2 (Tracker) a 3 (Finalizados)
+    2. Actualiza estado_tracker a 'finalizado'
+    3. Emite WebSocket a Tracker (eliminación)
+    4. Emite WebSocket a Finalizados (creación)
+    """
+    try:
+        with transaction.atomic():
+            # 1. Obtener el trámite del módulo Tracker
+            tracker = get_object_or_404(Preparacion, pk=pk, estado_modulo=2)
+
+            # 2. Guardar datos del tracker antes de la transición (para notificaciones)
+            tracker_data_before = {
+                'id': tracker.id,
+                'placa': tracker.placa,
+            }
+
+            # 3. Realizar la transición de módulo
+            tracker.estado_modulo = 3  # Mover a Finalizados
+            tracker.estado_tracker = 'finalizado'  # Marcar como finalizado
+            tracker.estado = 'finalizado'  # Actualizar estado general
+
+            # Opcionalmente actualizar estado_detalle
+            if 'estado_detalle' in request.data:
+                tracker.estado_detalle = request.data.get('estado_detalle', '')
+
+            tracker.save()
+
+            # 4. Construir datos completos para el módulo Finalizados (WebSocket)
+            finalizado_data = {
+                'id': tracker.id,
+                'placa': tracker.placa,
+                'tipo_vehiculo': tracker.tipo_vehiculo,
+                'departamento': tracker.departamento_id,
+                'municipio': tracker.municipio_id,
+                'nombre_depto': tracker.departamento.departamento if tracker.departamento else None,
+                'nombre_muni': tracker.municipio.municipio if tracker.municipio else None,
+                'estado': tracker.estado,
+                'estado_tracker': tracker.estado_tracker,
+                'estado_detalle': tracker.estado_detalle,
+                'fecha_recepcion_municipio': tracker.fecha_recepcion_municipio.isoformat() if tracker.fecha_recepcion_municipio else None,
+                'hace_dias': tracker.hace_dias,
+                'proveedor_id': tracker.proveedor_id,
+                'codigo_encargado': tracker.codigo_encargado,
+                'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
+                'usuario': tracker.usuario.username if tracker.usuario else 'Sin asignar',
+                'created_at': tracker.created_at.isoformat(),
+                'updated_at': tracker.updated_at.isoformat(),
+            }
+
+            # 5. Emitir notificaciones WebSocket
+            # 5.1. Notificar al módulo Tracker que el registro fue eliminado
+            notify_tracker_deleted(tracker_data_before['id'], tracker_data_before['placa'])
+
+            # 5.2. Notificar al módulo Finalizados que se creó un nuevo registro
+            from finalizados.websocket.utils import notify_finalizado_created
+            notify_finalizado_created(finalizado_data)
+
+            return Response({
+                "message": "Trámite finalizado exitosamente",
+                "id": tracker.id,
+                "placa": tracker.placa,
+                "estado_modulo": tracker.estado_modulo,
+                "estado_tracker": tracker.estado_tracker,
+            }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"❌ Error al finalizar tracker: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response(
+            {"error": f"Error al finalizar el trámite: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

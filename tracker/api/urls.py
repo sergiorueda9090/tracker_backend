@@ -8,4 +8,5 @@ urlpatterns = [
     path('<int:pk>/update/', views.update_tracker, name='update_tracker'),
     path('<int:pk>/delete/', views.delete_tracker, name='delete_tracker'),
     path('<int:pk>/history/', views.get_tracker_history, name='get_tracker_history'),
+    path('<int:pk>/finalizar/', views.finalizar_tracker, name='finalizar_tracker'),
 ]

@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/municipios/',    include('municipios.api.urls'), name="municipios"),
     path('api/preparacion/',   include('preparacion.api.urls'), name="preparacion"),
     path('api/tracker/',       include('tracker.api.urls'), name="tracker"),
+    path('api/finalizados/',   include('finalizados.api.urls'), name="finalizados"),
     path('test-websocket/',    views.test_websocket, name='test_websocket'),
 ]
 

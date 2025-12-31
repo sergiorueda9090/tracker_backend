@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'municipios',
     'preparacion',
     'tracker',
+    'finalizados',
 ]
 
 MIDDLEWARE = [
