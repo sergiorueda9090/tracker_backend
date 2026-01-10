@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'tracker',
     'finalizados',
     'archivadas',
+    'clientes',
 ]
 
 MIDDLEWARE = [
