@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'finalizados',
     'archivadas',
     'clientes',
+    'tramites',
 ]
 
 MIDDLEWARE = [
