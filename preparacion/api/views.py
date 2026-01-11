@@ -14,6 +14,7 @@ from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from proveedores.models import Proveedor
 from preparacion.websocket.utils import (
     notify_preparacion_created,
     notify_preparacion_updated,
@@ -48,11 +49,12 @@ def create_tramite(request):
             tipo_vehiculo   = data.get('tipo_vehiculo')
             departamento_id = data.get('departamento')
             municipio_id    = data.get('municipio')
+            proveedor_id    = data.get('proveedor_id', None)
             estado_modulo   = 1
 
-            if not all([placa, tipo_vehiculo, departamento_id, municipio_id]):
+            if not all([placa, tipo_vehiculo, departamento_id, municipio_id, proveedor_id]):
                 return Response(
-                    {"error": "Placa, tipo de vehículo, departamento y municipio son requeridos."},
+                    {"error": "Placa, tipo de vehículo, proveedor, departamento y municipio son requeridos."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -63,6 +65,7 @@ def create_tramite(request):
                 tipo_vehiculo=tipo_vehiculo,
                 departamento_id=departamento_id,
                 municipio_id=municipio_id,
+                proveedor_id=proveedor_id,
                 estado=data.get('estado', 'en_verificacion'),
                 paquete=data.get('paquete', ''),
                 lista_documentos=lista_docs,
@@ -101,6 +104,7 @@ def create_tramite(request):
                 'tipo_vehiculo': tramite.tipo_vehiculo,
                 'departamento': tramite.departamento_id,
                 'municipio': tramite.municipio_id,
+                'proveedor': tramite.proveedor_id,
                 'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
                 'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
                 'estado': tramite.estado,
@@ -117,7 +121,11 @@ def create_tramite(request):
             }
             
             # 6. 🔥 NOTIFICAR VÍA WEBSOCKET 🔥
-            notify_preparacion_created(tramite_data)
+            try:
+                notify_preparacion_created(tramite_data)
+            except Exception as ws_error:
+                # Si WebSocket falla, solo registrar el error pero continuar
+                print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
             return Response({
                 "id": tramite.id,
@@ -155,11 +163,16 @@ def list_tramites(request):
             id=OuterRef('id')
         ).select_related('usuario').values('usuario__username')[:1]
 
+        nombre_proveedor_subquery = Proveedor.objects.filter(
+            id=OuterRef('proveedor')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation
-        tramites = Preparacion.objects.select_related('usuario', 'departamento', 'municipio').annotate(
+        tramites = Preparacion.objects.select_related('usuario', 'departamento', 'municipio', 'proveedor').annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
-            nombre_usuario=Subquery(nombre_usuario_subquery)
+            nombre_usuario=Subquery(nombre_usuario_subquery),
+            nombre_proveedor=Subquery(nombre_proveedor_subquery)
         ).all().filter(estado_modulo=1)
 
         # --- Filtro de Buscador (Search) ---
@@ -205,6 +218,13 @@ def list_tramites(request):
             from datetime import datetime as dt, time
             end_date_inclusive = dt.combine(end_date, time.max)
             tramites = tramites.filter(created_at__lte=end_date_inclusive)
+        
+        departamento = request.query_params.get('departamento', None)
+        municipio    = request.query_params.get('municipio', None)
+
+        if departamento and municipio:
+            tramites = tramites.filter(departamento=departamento).filter(municipio=municipio)
+
 
         # 3. Selección de campos (Values)
         tramites_data = []
@@ -230,6 +250,7 @@ def list_tramites(request):
                 'municipio': tramite.municipio_id,
                 'nombre_depto': tramite.nombre_depto,
                 'nombre_muni': tramite.nombre_muni,
+                'nombre_proveedor': tramite.nombre_proveedor,
                 'estado': tramite.estado,
                 'paquete': tramite.paquete,
                 'lista_documentos': tramite.lista_documentos,
@@ -280,6 +301,7 @@ def get_tramite(request, pk):
             "placa": tramite.placa,
             "tipo_vehiculo": tramite.tipo_vehiculo,
             "departamento": tramite.departamento_id,
+            "proveedor_id": tramite.proveedor_id,
             "municipio": tramite.municipio_id,
             "estado": tramite.estado,
             "paquete": tramite.paquete,
@@ -412,7 +434,10 @@ def update_tramite(request, pk):
             'archivos': archivos_list,
             'total_archivos': len(archivos_list)
         }
-        notify_preparacion_updated(tramite_data)
+        try:
+            notify_preparacion_updated(tramite_data)
+        except Exception as ws_error:
+            print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
         return Response(response_data, status=status.HTTP_200_OK)
 
@@ -442,7 +467,10 @@ def delete_tramite(request, pk):
         tramite.delete()
 
         # 🔥 NOTIFICAR VÍA WEBSOCKET - Trámite eliminado 🔥
-        notify_preparacion_deleted(tramite_id, tramite_placa)
+        try:
+            notify_preparacion_deleted(tramite_id, tramite_placa)
+        except Exception as ws_error:
+            print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
         return Response(
             {"message": "Tramite deleted successfully"},
@@ -475,7 +503,10 @@ def delete_archivo(request, archivo_id):
         archivo.delete()
 
         # 🔥 NOTIFICAR VÍA WEBSOCKET - Archivo eliminado 🔥
-        notify_archivo_deleted(tramite_id, archivo_id, nombre_archivo)
+        try:
+            notify_archivo_deleted(tramite_id, archivo_id, nombre_archivo)
+        except Exception as ws_error:
+            print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
         return Response(
             {"message": "Archivo eliminado exitosamente"},
@@ -619,11 +650,13 @@ def send_to_tracker(request, pk):
             }
 
             # 6. Notificar vía WebSocket
-            # Notificar a preparación que el trámite fue movido (eliminar de vista)
-            notify_preparacion_sent_to_tracker(preparacion.id, preparacion.placa, preparacion.id)
-
-            # Notificar a tracker que se creó un nuevo trámite
-            notify_tracker_created(tracker_data)
+            try:
+                # Notificar a preparación que el trámite fue movido (eliminar de vista)
+                notify_preparacion_sent_to_tracker(preparacion.id, preparacion.placa, preparacion.id)
+                # Notificar a tracker que se creó un nuevo trámite
+                notify_tracker_created(tracker_data)
+            except Exception as ws_error:
+                print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
             return Response({
                 "message": "Trámite enviado al Tracker exitosamente",

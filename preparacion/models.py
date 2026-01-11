@@ -2,6 +2,7 @@ from django.db import models
 from user.models import User
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from proveedores.models import Proveedor
 from simple_history.models import HistoricalRecords
 
 # Create your models here.
@@ -83,7 +84,7 @@ class Preparacion(models.Model):
 
     # Proveedor (usado en módulo Tracker)
     proveedor = models.ForeignKey(
-        'proveedores.Proveedor',
+        Proveedor,
         on_delete=models.PROTECT,
         related_name='tramites_preparacion',
         db_column='proveedor_id',
