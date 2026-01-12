@@ -37,9 +37,10 @@ urlpatterns = [
     path('api/preparacion/',   include('preparacion.api.urls'), name="preparacion"),
     path('api/tracker/',       include('tracker.api.urls'), name="tracker"),
     path('api/finalizados/',   include('finalizados.api.urls'), name="finalizados"),
-    path('api/archivadas/',    include('archivadas.api.urls'), name="archivadas"),
-    path('api/tramites/',      include('tramites.api.urls'), name="tramites"),
-    path('test-websocket/',    views.test_websocket, name='test_websocket'),
+    path('api/archivadas/',       include('archivadas.api.urls'), name="archivadas"),
+    path('api/tramites/',         include('tramites.api.urls'), name="tramites"),
+    path('api/transitotarifas/',  include('transitotarifas.api.urls'), name="transitotarifas"),
+    path('test-websocket/',       views.test_websocket, name='test_websocket'),
 ]
 
 # Servir archivos media en desarrollo

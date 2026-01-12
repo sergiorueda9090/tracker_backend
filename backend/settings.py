@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'archivadas',
     'clientes',
     'tramites',
+    'transitotarifas',
 ]
 
 MIDDLEWARE = [
