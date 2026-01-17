@@ -3,6 +3,7 @@ from user.models import User
 from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
+from clientes.models import Cliente
 from simple_history.models import HistoricalRecords
 
 # Create your models here.
@@ -91,6 +92,16 @@ class Preparacion(models.Model):
         null=True,
         blank=True,
         help_text="Proveedor encargado del trámite (usado en módulo Tracker)"
+    )
+
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name='tramites_preparacion',
+        db_column='cliente_id',
+        null=True,
+        blank=True,
+        help_text="Cliente asociado al trámite"
     )
 
     # Estado del trámite

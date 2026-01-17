@@ -5,118 +5,152 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 from datetime import datetime
 
-from transitotarifas.models import TransitoTarifa
+from transitotarifas.models import TransitoTarifa, TransitoTarifaTramite, TransitoTarifaGestor
 from tramites.models import Tramite
 from proveedores.models import Proveedor
+from departamentos.models import Departamento
+from municipios.models import Municipio
 from user.api.permissions import RolePermission
 
 
-# ✅ Crear tránsito tarifa
+# ✅ Crear tránsito tarifa con estructura completa
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, RolePermission(['admin'])])
 def create_transito_tarifa(request):
     try:
         data = request.data
 
-        tramite_id = data.get('tramite_id')
-        proveedor_id = data.get('proveedor_id')
-        servicio_proveedor = data.get('servicio_proveedor')
-        servicio_empresa = data.get('servicio_empresa')
+        departamento_id = data.get('departamento_id')
+        municipio_id = data.get('municipio_id')
+        tramites_data = data.get('tramites', [])
 
-        # Validaciones
-        if not tramite_id:
+        # Validaciones básicas
+        if not departamento_id:
             return Response(
-                {"error": "El trámite es requerido."},
+                {"error": "El departamento es requerido."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not proveedor_id:
+        if not municipio_id:
             return Response(
-                {"error": "El proveedor es requerido."},
+                {"error": "El municipio es requerido."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not servicio_proveedor:
+        if not tramites_data or len(tramites_data) == 0:
             return Response(
-                {"error": "El servicio del proveedor es requerido."},
+                {"error": "Debe agregar al menos un trámite."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not servicio_empresa:
-            return Response(
-                {"error": "El servicio de la empresa es requerido."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validar que los precios sean números válidos
+        # Verificar que existan el departamento y municipio
         try:
-            servicio_proveedor = float(servicio_proveedor)
-            servicio_empresa = float(servicio_empresa)
-
-            if servicio_proveedor < 0 or servicio_empresa < 0:
-                return Response(
-                    {"error": "Los precios no pueden ser negativos."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        except (ValueError, TypeError):
+            departamento = Departamento.objects.get(pk=departamento_id)
+        except Departamento.DoesNotExist:
             return Response(
-                {"error": "Los precios deben ser números válidos."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Verificar que existan el trámite y el proveedor
-        try:
-            tramite = Tramite.objects.get(pk=tramite_id)
-        except Tramite.DoesNotExist:
-            return Response(
-                {"error": "El trámite especificado no existe."},
+                {"error": "El departamento especificado no existe."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            proveedor = Proveedor.objects.get(pk=proveedor_id)
-        except Proveedor.DoesNotExist:
+            municipio = Municipio.objects.get(pk=municipio_id)
+        except Municipio.DoesNotExist:
             return Response(
-                {"error": "El proveedor especificado no existe."},
+                {"error": "El municipio especificado no existe."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         # Verificar si ya existe esta combinación
-        if TransitoTarifa.objects.filter(tramite=tramite, proveedor=proveedor).exists():
+        if TransitoTarifa.objects.filter(departamento=departamento, municipio=municipio).exists():
             return Response(
-                {"error": "Ya existe una tarifa para este trámite y proveedor."},
+                {"error": "Ya existe una configuración para este departamento y municipio."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Crear la tarifa
-        transito_tarifa = TransitoTarifa.objects.create(
-            tramite=tramite,
-            proveedor=proveedor,
-            servicio_proveedor=servicio_proveedor,
-            servicio_empresa=servicio_empresa
-        )
+        # Usar transacción para asegurar integridad
+        with transaction.atomic():
+            # Crear TransitoTarifa (nivel 1)
+            transito_tarifa = TransitoTarifa.objects.create(
+                departamento=departamento,
+                municipio=municipio
+            )
 
+            # Crear TransitoTarifaTramite y TransitoTarifaGestor (niveles 2 y 3)
+            for tramite_data in tramites_data:
+                tramite_id = tramite_data.get('tramite_id')
+                derechos_2026 = tramite_data.get('derechos_2026')
+                gestores_data = tramite_data.get('gestores', [])
+
+                # Validar trámite
+                if not tramite_id:
+                    raise ValueError("Cada trámite debe tener un tramite_id.")
+
+                if not derechos_2026:
+                    raise ValueError("Cada trámite debe tener derechos_2026.")
+
+                if not gestores_data or len(gestores_data) == 0:
+                    raise ValueError(f"El trámite debe tener al menos un gestor.")
+
+                try:
+                    tramite = Tramite.objects.get(pk=tramite_id)
+                except Tramite.DoesNotExist:
+                    raise ValueError(f"El trámite con ID {tramite_id} no existe.")
+
+                # Crear TransitoTarifaTramite (nivel 2)
+                tramite_tarifa = TransitoTarifaTramite.objects.create(
+                    transito_tarifa=transito_tarifa,
+                    tramite=tramite,
+                    derechos_2026=derechos_2026
+                )
+
+                # Crear TransitoTarifaGestor (nivel 3)
+                for gestor_data in gestores_data:
+                    proveedor_id = gestor_data.get('proveedor_id')
+                    servicio_gestor = gestor_data.get('servicio_gestor')
+                    servicio_empresa = gestor_data.get('servicio_empresa')
+
+                    # Validar gestor
+                    if not proveedor_id:
+                        raise ValueError("Cada gestor debe tener un proveedor_id.")
+
+                    if not servicio_gestor:
+                        raise ValueError("Cada gestor debe tener servicio_gestor.")
+
+                    if not servicio_empresa:
+                        raise ValueError("Cada gestor debe tener servicio_empresa.")
+
+                    try:
+                        proveedor = Proveedor.objects.get(pk=proveedor_id)
+                    except Proveedor.DoesNotExist:
+                        raise ValueError(f"El proveedor con ID {proveedor_id} no existe.")
+
+                    TransitoTarifaGestor.objects.create(
+                        tramite_tarifa=tramite_tarifa,
+                        proveedor=proveedor,
+                        servicio_gestor=servicio_gestor,
+                        servicio_empresa=servicio_empresa
+                    )
+
+        # Retornar datos creados
         response_data = {
             "id": transito_tarifa.id,
-            "tramite_id": transito_tarifa.tramite.id,
-            "tramite_nombre": transito_tarifa.tramite.nombre,
-            "proveedor_id": transito_tarifa.proveedor.id,
-            "proveedor_nombre": transito_tarifa.proveedor.nombre,
-            "proveedor_codigo": transito_tarifa.proveedor.codigo_encargado,
-            "servicio_proveedor": str(transito_tarifa.servicio_proveedor),
-            "servicio_empresa": str(transito_tarifa.servicio_empresa),
-            "margen_ganancia": str(transito_tarifa.margen_ganancia),
-            "porcentaje_margen": round(transito_tarifa.porcentaje_margen, 2),
+            "departamento_id": transito_tarifa.departamento.id_departamento,
+            "municipio_id": transito_tarifa.municipio.id_municipio,
             "is_active": transito_tarifa.is_active,
             "created_at": transito_tarifa.created_at,
             "updated_at": transito_tarifa.updated_at,
         }
         return Response(response_data, status=status.HTTP_201_CREATED)
 
+    except ValueError as e:
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     except DatabaseError as e:
         return Response(
             {"error": f"Error de base de datos: {str(e)}"},
@@ -134,27 +168,31 @@ def create_transito_tarifa(request):
 @permission_classes([IsAuthenticated])
 def list_transito_tarifas(request):
     try:
-        # QuerySet base con relaciones
-        transito_tarifas = TransitoTarifa.objects.select_related('tramite', 'proveedor').all()
+        # QuerySet base
+        transito_tarifas = TransitoTarifa.objects.select_related(
+            'departamento', 'municipio'
+        ).prefetch_related(
+            'tramites__tramite',
+            'tramites__gestores__proveedor'
+        )
 
         # Filtro de búsqueda
         search_query = request.query_params.get('search', None)
         if search_query:
             transito_tarifas = transito_tarifas.filter(
-                Q(tramite__nombre__icontains=search_query) |
-                Q(proveedor__nombre__icontains=search_query) |
-                Q(proveedor__codigo_encargado__icontains=search_query)
+                Q(departamento__departamento__icontains=search_query) |
+                Q(municipio__municipio__icontains=search_query)
             )
 
-        # Filtro por trámite
-        tramite_filter = request.query_params.get('tramite', None)
-        if tramite_filter:
-            transito_tarifas = transito_tarifas.filter(tramite_id=tramite_filter)
+        # Filtro por departamento
+        departamento_filter = request.query_params.get('departamento', None)
+        if departamento_filter:
+            transito_tarifas = transito_tarifas.filter(departamento_id=departamento_filter)
 
-        # Filtro por proveedor
-        proveedor_filter = request.query_params.get('proveedor', None)
-        if proveedor_filter:
-            transito_tarifas = transito_tarifas.filter(proveedor_id=proveedor_filter)
+        # Filtro por municipio
+        municipio_filter = request.query_params.get('municipio', None)
+        if municipio_filter:
+            transito_tarifas = transito_tarifas.filter(municipio_id=municipio_filter)
 
         # Filtro por estado
         status_filter = request.query_params.get('status', None)
@@ -175,28 +213,32 @@ def list_transito_tarifas(request):
             end_date_inclusive = dt.combine(end_date, time.max)
             transito_tarifas = transito_tarifas.filter(created_at__lte=end_date_inclusive)
 
-        # Ordenar y seleccionar campos
-        transito_tarifas_data = transito_tarifas.order_by('tramite__nombre', 'proveedor__nombre').values(
-            'id',
-            'tramite_id',
-            'tramite__nombre',
-            'proveedor_id',
-            'proveedor__nombre',
-            'proveedor__codigo_encargado',
-            'servicio_proveedor',
-            'servicio_empresa',
-            'is_active',
-            'created_at',
-            'updated_at',
-        )
+        # Ordenar
+        transito_tarifas = transito_tarifas.order_by('departamento__departamento', 'municipio__municipio')
 
         # Paginación
         page_size = int(request.query_params.get('page_size', 10))
         paginator = PageNumberPagination()
         paginator.page_size = page_size
 
-        paginated_queryset = paginator.paginate_queryset(transito_tarifas_data, request)
-        return paginator.get_paginated_response(paginated_queryset)
+        paginated_queryset = paginator.paginate_queryset(transito_tarifas, request)
+
+        # Serializar datos
+        results = []
+        for tarifa in paginated_queryset:
+            results.append({
+                'id': tarifa.id,
+                'departamento_id': tarifa.departamento.id_departamento,
+                'departamento_nombre': tarifa.departamento.departamento,
+                'municipio_id': tarifa.municipio.id_municipio,
+                'municipio_nombre': tarifa.municipio.municipio,
+                'is_active': tarifa.is_active,
+                'created_at': tarifa.created_at,
+                'updated_at': tarifa.updated_at,
+                'total_tramites': tarifa.tramites.count(),
+            })
+
+        return paginator.get_paginated_response(results)
 
     except Exception as e:
         return Response(
@@ -205,31 +247,50 @@ def list_transito_tarifas(request):
         )
 
 
-# ✅ Obtener tránsito tarifa por ID
+# ✅ Obtener tránsito tarifa por ID con toda la estructura
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_transito_tarifa(request, pk):
     try:
         transito_tarifa = get_object_or_404(
-            TransitoTarifa.objects.select_related('tramite', 'proveedor'),
+            TransitoTarifa.objects.select_related('departamento', 'municipio')
+            .prefetch_related('tramites__tramite', 'tramites__gestores__proveedor'),
             pk=pk
         )
+
+        # Serializar estructura completa
+        tramites_data = []
+        for tramite_tarifa in transito_tarifa.tramites.all():
+            gestores_data = []
+            for gestor in tramite_tarifa.gestores.all():
+                gestores_data.append({
+                    'proveedor_id': gestor.proveedor.id,
+                    'proveedor_nombre': gestor.proveedor.nombre,
+                    'proveedor_codigo': gestor.proveedor.codigo_encargado,
+                    'servicio_gestor': str(gestor.servicio_gestor),
+                    'servicio_empresa': str(gestor.servicio_empresa),
+                })
+
+            tramites_data.append({
+                'tramite_id': tramite_tarifa.tramite.id,
+                'tramite_nombre': tramite_tarifa.tramite.nombre,
+                'derechos_2026': str(tramite_tarifa.derechos_2026),
+                'gestores': gestores_data,
+            })
+
         data = {
             "id": transito_tarifa.id,
-            "tramite_id": transito_tarifa.tramite.id,
-            "tramite_nombre": transito_tarifa.tramite.nombre,
-            "proveedor_id": transito_tarifa.proveedor.id,
-            "proveedor_nombre": transito_tarifa.proveedor.nombre,
-            "proveedor_codigo": transito_tarifa.proveedor.codigo_encargado,
-            "servicio_proveedor": str(transito_tarifa.servicio_proveedor),
-            "servicio_empresa": str(transito_tarifa.servicio_empresa),
-            "margen_ganancia": str(transito_tarifa.margen_ganancia),
-            "porcentaje_margen": round(transito_tarifa.porcentaje_margen, 2),
+            "departamento_id": transito_tarifa.departamento.id_departamento,
+            "departamento_nombre": transito_tarifa.departamento.departamento,
+            "municipio_id": transito_tarifa.municipio.id_municipio,
+            "municipio_nombre": transito_tarifa.municipio.municipio,
             "is_active": transito_tarifa.is_active,
             "created_at": transito_tarifa.created_at,
             "updated_at": transito_tarifa.updated_at,
+            "tramites": tramites_data,
         }
         return Response(data, status=status.HTTP_200_OK)
+
     except Exception as e:
         return Response(
             {"error": f"Error al obtener tránsito tarifa: {str(e)}"},
@@ -245,108 +306,139 @@ def update_transito_tarifa(request, pk):
         transito_tarifa = get_object_or_404(TransitoTarifa, pk=pk)
         data = request.data
 
-        # Actualizar trámite si se proporciona
-        tramite_id = data.get('tramite_id')
-        if tramite_id and tramite_id != transito_tarifa.tramite.id:
-            try:
-                tramite = Tramite.objects.get(pk=tramite_id)
+        departamento_id = data.get('departamento_id')
+        municipio_id = data.get('municipio_id')
+        tramites_data = data.get('tramites', [])
 
-                # Verificar que no exista la combinación nueva
-                if TransitoTarifa.objects.filter(
+        # Validaciones
+        if not departamento_id:
+            return Response(
+                {"error": "El departamento es requerido."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not municipio_id:
+            return Response(
+                {"error": "El municipio es requerido."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not tramites_data or len(tramites_data) == 0:
+            return Response(
+                {"error": "Debe agregar al menos un trámite."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verificar que existan el departamento y municipio
+        try:
+            departamento = Departamento.objects.get(pk=departamento_id)
+        except Departamento.DoesNotExist:
+            return Response(
+                {"error": "El departamento especificado no existe."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            municipio = Municipio.objects.get(pk=municipio_id)
+        except Municipio.DoesNotExist:
+            return Response(
+                {"error": "El municipio especificado no existe."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verificar si ya existe otra configuración con esta combinación
+        if TransitoTarifa.objects.filter(
+            departamento=departamento,
+            municipio=municipio
+        ).exclude(pk=pk).exists():
+            return Response(
+                {"error": "Ya existe una configuración para este departamento y municipio."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Usar transacción
+        with transaction.atomic():
+            # Actualizar departamento y municipio
+            transito_tarifa.departamento = departamento
+            transito_tarifa.municipio = municipio
+            transito_tarifa.save()
+
+            # Eliminar trámites y gestores anteriores (CASCADE elimina gestores automáticamente)
+            transito_tarifa.tramites.all().delete()
+
+            # Crear nuevos trámites y gestores
+            for tramite_data in tramites_data:
+                tramite_id = tramite_data.get('tramite_id')
+                derechos_2026 = tramite_data.get('derechos_2026')
+                gestores_data = tramite_data.get('gestores', [])
+
+                # Validar trámite
+                if not tramite_id:
+                    raise ValueError("Cada trámite debe tener un tramite_id.")
+
+                if not derechos_2026:
+                    raise ValueError("Cada trámite debe tener derechos_2026.")
+
+                if not gestores_data or len(gestores_data) == 0:
+                    raise ValueError(f"El trámite debe tener al menos un gestor.")
+
+                try:
+                    tramite = Tramite.objects.get(pk=tramite_id)
+                except Tramite.DoesNotExist:
+                    raise ValueError(f"El trámite con ID {tramite_id} no existe.")
+
+                # Crear TransitoTarifaTramite
+                tramite_tarifa = TransitoTarifaTramite.objects.create(
+                    transito_tarifa=transito_tarifa,
                     tramite=tramite,
-                    proveedor=transito_tarifa.proveedor
-                ).exclude(pk=pk).exists():
-                    return Response(
-                        {"error": "Ya existe una tarifa para este trámite y proveedor."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                transito_tarifa.tramite = tramite
-            except Tramite.DoesNotExist:
-                return Response(
-                    {"error": "El trámite especificado no existe."},
-                    status=status.HTTP_400_BAD_REQUEST
+                    derechos_2026=derechos_2026
                 )
 
-        # Actualizar proveedor si se proporciona
-        proveedor_id = data.get('proveedor_id')
-        if proveedor_id and proveedor_id != transito_tarifa.proveedor.id:
-            try:
-                proveedor = Proveedor.objects.get(pk=proveedor_id)
+                # Crear TransitoTarifaGestor
+                for gestor_data in gestores_data:
+                    proveedor_id = gestor_data.get('proveedor_id')
+                    servicio_gestor = gestor_data.get('servicio_gestor')
+                    servicio_empresa = gestor_data.get('servicio_empresa')
 
-                # Verificar que no exista la combinación nueva
-                if TransitoTarifa.objects.filter(
-                    tramite=transito_tarifa.tramite,
-                    proveedor=proveedor
-                ).exclude(pk=pk).exists():
-                    return Response(
-                        {"error": "Ya existe una tarifa para este trámite y proveedor."},
-                        status=status.HTTP_400_BAD_REQUEST
+                    # Validar gestor
+                    if not proveedor_id:
+                        raise ValueError("Cada gestor debe tener un proveedor_id.")
+
+                    if not servicio_gestor:
+                        raise ValueError("Cada gestor debe tener servicio_gestor.")
+
+                    if not servicio_empresa:
+                        raise ValueError("Cada gestor debe tener servicio_empresa.")
+
+                    try:
+                        proveedor = Proveedor.objects.get(pk=proveedor_id)
+                    except Proveedor.DoesNotExist:
+                        raise ValueError(f"El proveedor con ID {proveedor_id} no existe.")
+
+                    TransitoTarifaGestor.objects.create(
+                        tramite_tarifa=tramite_tarifa,
+                        proveedor=proveedor,
+                        servicio_gestor=servicio_gestor,
+                        servicio_empresa=servicio_empresa
                     )
 
-                transito_tarifa.proveedor = proveedor
-            except Proveedor.DoesNotExist:
-                return Response(
-                    {"error": "El proveedor especificado no existe."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        # Actualizar servicio_proveedor si se proporciona
-        if 'servicio_proveedor' in data:
-            try:
-                servicio_proveedor = float(data.get('servicio_proveedor'))
-                if servicio_proveedor < 0:
-                    return Response(
-                        {"error": "El servicio del proveedor no puede ser negativo."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                transito_tarifa.servicio_proveedor = servicio_proveedor
-            except (ValueError, TypeError):
-                return Response(
-                    {"error": "El servicio del proveedor debe ser un número válido."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        # Actualizar servicio_empresa si se proporciona
-        if 'servicio_empresa' in data:
-            try:
-                servicio_empresa = float(data.get('servicio_empresa'))
-                if servicio_empresa < 0:
-                    return Response(
-                        {"error": "El servicio de la empresa no puede ser negativo."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                transito_tarifa.servicio_empresa = servicio_empresa
-            except (ValueError, TypeError):
-                return Response(
-                    {"error": "El servicio de la empresa debe ser un número válido."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        # Actualizar estado si se proporciona
-        if 'is_active' in data:
-            transito_tarifa.is_active = bool(int(data.get('is_active')))
-
-        transito_tarifa.save()
-
+        # Retornar datos actualizados
         response_data = {
             "id": transito_tarifa.id,
-            "tramite_id": transito_tarifa.tramite.id,
-            "tramite_nombre": transito_tarifa.tramite.nombre,
-            "proveedor_id": transito_tarifa.proveedor.id,
-            "proveedor_nombre": transito_tarifa.proveedor.nombre,
-            "proveedor_codigo": transito_tarifa.proveedor.codigo_encargado,
-            "servicio_proveedor": str(transito_tarifa.servicio_proveedor),
-            "servicio_empresa": str(transito_tarifa.servicio_empresa),
-            "margen_ganancia": str(transito_tarifa.margen_ganancia),
-            "porcentaje_margen": round(transito_tarifa.porcentaje_margen, 2),
+            "departamento_id": transito_tarifa.departamento.id_departamento,
+            "municipio_id": transito_tarifa.municipio.id_municipio,
             "is_active": transito_tarifa.is_active,
         }
         return Response(response_data, status=status.HTTP_200_OK)
 
+    except ValueError as e:
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
     except DatabaseError as e:
         return Response(
-            {"error": f"Error de base de datos al actualizar tránsito tarifa: {str(e)}"},
+            {"error": f"Error de base de datos al actualizar: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
     except Exception as e:
@@ -364,7 +456,7 @@ def delete_transito_tarifa(request, pk):
         transito_tarifa = get_object_or_404(TransitoTarifa, pk=pk)
         transito_tarifa.delete()
         return Response(
-            {"message": "Tránsito tarifa eliminada exitosamente"},
+            {"message": "Tránsito tarifa eliminado exitosamente"},
             status=status.HTTP_204_NO_CONTENT
         )
     except Exception as e:

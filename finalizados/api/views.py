@@ -14,6 +14,7 @@ from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
+from clientes.models import Cliente
 from finalizados.websocket.utils import (
     notify_finalizado_created,
     notify_finalizado_updated,
@@ -157,12 +158,17 @@ def list_finalizados(request):
             id_municipio=OuterRef('municipio')
         ).values('municipio')[:1]
 
+        nombre_cliente_subquery = Cliente.objects.filter(
+            id=OuterRef('cliente')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation (filtrado por estado_modulo=3 para finalizado)
         finalizados = Preparacion.objects.select_related(
             'usuario', 'departamento', 'municipio', 'proveedor'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
-            nombre_muni=Subquery(nombre_muni_subquery)
+            nombre_muni=Subquery(nombre_muni_subquery),
+            nombre_cliente=Subquery(nombre_cliente_subquery)
         ).filter(estado_modulo=3)  # CRÍTICO: Solo registros del módulo Finalizados
 
         # --- Filtros ---
@@ -244,6 +250,7 @@ def list_finalizados(request):
                 'municipio': finalizado.municipio_id,
                 'nombre_depto': finalizado.nombre_depto,
                 'nombre_muni': finalizado.nombre_muni,
+                'nombre_cliente': finalizado.nombre_cliente,
                 'estado': finalizado.estado,
                 'estado_detalle': finalizado.estado_detalle,
                 'estado_tracker': finalizado.estado_tracker,

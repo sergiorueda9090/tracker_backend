@@ -14,6 +14,7 @@ from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from clientes.models import Cliente
 from proveedores.models import Proveedor
 from preparacion.websocket.utils import (
     notify_preparacion_created,
@@ -50,11 +51,12 @@ def create_tramite(request):
             departamento_id = data.get('departamento')
             municipio_id    = data.get('municipio')
             proveedor_id    = data.get('proveedor_id', None)
+            cliente_id      = data.get('cliente_id', None)
             estado_modulo   = 1
 
-            if not all([placa, tipo_vehiculo, departamento_id, municipio_id, proveedor_id]):
+            if not all([placa, tipo_vehiculo, departamento_id, municipio_id, proveedor_id, cliente_id]):
                 return Response(
-                    {"error": "Placa, tipo de vehículo, proveedor, departamento y municipio son requeridos."},
+                    {"error": "Placa, tipo de vehículo, proveedor, departamento, municipio y cliente son requeridos."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -66,6 +68,7 @@ def create_tramite(request):
                 departamento_id=departamento_id,
                 municipio_id=municipio_id,
                 proveedor_id=proveedor_id,
+                cliente_id=cliente_id,
                 estado=data.get('estado', 'en_verificacion'),
                 paquete=data.get('paquete', ''),
                 lista_documentos=lista_docs,
@@ -105,6 +108,7 @@ def create_tramite(request):
                 'departamento': tramite.departamento_id,
                 'municipio': tramite.municipio_id,
                 'proveedor': tramite.proveedor_id,
+                'cliente': tramite.cliente_id,
                 'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
                 'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
                 'estado': tramite.estado,
@@ -167,12 +171,17 @@ def list_tramites(request):
             id=OuterRef('proveedor')
         ).values('nombre')[:1]
 
+        nombre_cliente_subquery = Cliente.objects.filter(
+            id=OuterRef('cliente')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation
         tramites = Preparacion.objects.select_related('usuario', 'departamento', 'municipio', 'proveedor').annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
             nombre_usuario=Subquery(nombre_usuario_subquery),
-            nombre_proveedor=Subquery(nombre_proveedor_subquery)
+            nombre_proveedor=Subquery(nombre_proveedor_subquery),
+            nombre_cliente=Subquery(nombre_cliente_subquery)
         ).all().filter(estado_modulo=1)
 
         # --- Filtro de Buscador (Search) ---
@@ -183,7 +192,8 @@ def list_tramites(request):
                 Q(tipo_vehiculo__icontains=search_query) |
                 Q(usuario__username__icontains=search_query) |
                 Q(nombre_depto__icontains=search_query) |
-                Q(nombre_muni__icontains=search_query)
+                Q(nombre_muni__icontains=search_query) |
+                Q(nombre_cliente__icontains=search_query)
             )
 
         # --- Filtros de Estado ---
@@ -251,6 +261,7 @@ def list_tramites(request):
                 'nombre_depto': tramite.nombre_depto,
                 'nombre_muni': tramite.nombre_muni,
                 'nombre_proveedor': tramite.nombre_proveedor,
+                'nombre_cliente': tramite.nombre_cliente,
                 'estado': tramite.estado,
                 'paquete': tramite.paquete,
                 'lista_documentos': tramite.lista_documentos,
@@ -302,6 +313,7 @@ def get_tramite(request, pk):
             "tipo_vehiculo": tramite.tipo_vehiculo,
             "departamento": tramite.departamento_id,
             "proveedor_id": tramite.proveedor_id,
+            "cliente_id": tramite.cliente_id,
             "municipio": tramite.municipio_id,
             "estado": tramite.estado,
             "paquete": tramite.paquete,
@@ -309,7 +321,7 @@ def get_tramite(request, pk):
             "usuario": tramite.usuario.username if tramite.usuario else 'Sin asignar',
             "created_at": tramite.created_at,
             "updated_at": tramite.updated_at,
-            "archivos": archivos_list
+            "archivos": archivos_list,
         }
         return Response(data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -342,6 +354,8 @@ def update_tramite(request, pk):
         tramite.estado = data.get('estado', tramite.estado)
         tramite.paquete = data.get('paquete', tramite.paquete)
         tramite.lista_documentos = data.get('lista_documentos', tramite.lista_documentos)
+        tramite.proveedor_id = data.get('proveedor_id', tramite.proveedor_id)
+        tramite.cliente_id = data.get('cliente_id', tramite.cliente_id)
 
         if 'departamento' in data:
             tramite.departamento_id = data.get('departamento')
@@ -424,6 +438,8 @@ def update_tramite(request, pk):
             'usuario': tramite.usuario.username if tramite.usuario else 'Sin asignar',
             'departamento': tramite.departamento_id,
             'municipio': tramite.municipio_id,
+            'proveedor': tramite.proveedor_id,
+            'cliente': tramite.cliente_id,
             'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
             'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
             'documentos_completos': tramite.documentos_completos,

@@ -16,11 +16,6 @@ class Tramite(models.Model):
         null=True,
         help_text="Descripción detallada del trámite"
     )
-    precio = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        help_text="Precio del trámite en pesos colombianos"
-    )
     is_active = models.BooleanField(
         default=True,
         help_text="Indica si el trámite está activo"
@@ -48,4 +43,4 @@ class Tramite(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.nombre} - ${self.precio}"
+        return self.nombre

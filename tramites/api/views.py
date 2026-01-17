@@ -22,32 +22,11 @@ def create_tramite(request):
 
         nombre = data.get('nombre')
         descripcion = data.get('descripcion', '')
-        precio = data.get('precio')
 
         # Validaciones
         if not nombre:
             return Response(
                 {"error": "El nombre es requerido."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if not precio:
-            return Response(
-                {"error": "El precio es requerido."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Validar que el precio sea un número válido
-        try:
-            precio = float(precio)
-            if precio < 0:
-                return Response(
-                    {"error": "El precio no puede ser negativo."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        except (ValueError, TypeError):
-            return Response(
-                {"error": "El precio debe ser un número válido."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -61,15 +40,13 @@ def create_tramite(request):
         # Crear el trámite
         tramite = Tramite.objects.create(
             nombre=nombre,
-            descripcion=descripcion,
-            precio=precio
+            descripcion=descripcion
         )
 
         response_data = {
             "id": tramite.id,
             "nombre": tramite.nombre,
             "descripcion": tramite.descripcion,
-            "precio": str(tramite.precio),
             "is_active": tramite.is_active,
             "created_at": tramite.created_at,
             "updated_at": tramite.updated_at,
@@ -128,7 +105,6 @@ def list_tramites(request):
             'id',
             'nombre',
             'descripcion',
-            'precio',
             'is_active',
             'created_at',
             'updated_at',
@@ -159,7 +135,6 @@ def get_tramite(request, pk):
             "id": tramite.id,
             "nombre": tramite.nombre,
             "descripcion": tramite.descripcion,
-            "precio": str(tramite.precio),
             "is_active": tramite.is_active,
             "created_at": tramite.created_at,
             "updated_at": tramite.updated_at,
@@ -195,22 +170,6 @@ def update_tramite(request, pk):
         if 'descripcion' in data:
             tramite.descripcion = data.get('descripcion', '')
 
-        # Actualizar precio si se proporciona
-        if 'precio' in data:
-            try:
-                precio = float(data.get('precio'))
-                if precio < 0:
-                    return Response(
-                        {"error": "El precio no puede ser negativo."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                tramite.precio = precio
-            except (ValueError, TypeError):
-                return Response(
-                    {"error": "El precio debe ser un número válido."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
         # Actualizar estado si se proporciona
         if 'is_active' in data:
             tramite.is_active = bool(int(data.get('is_active')))
@@ -221,7 +180,6 @@ def update_tramite(request, pk):
             "id": tramite.id,
             "nombre": tramite.nombre,
             "descripcion": tramite.descripcion,
-            "precio": str(tramite.precio),
             "is_active": tramite.is_active,
         }
         return Response(response_data, status=status.HTTP_200_OK)

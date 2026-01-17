@@ -13,7 +13,9 @@ from preparacion.models import Preparacion, PreparacionArchivo
 from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
+from clientes.models import Cliente
 from proveedores.models import Proveedor
+from transitotarifas.models import TransitoTarifa, TransitoTarifaTramite, TransitoTarifaGestor
 from tracker.websocket.utils import (
     notify_tracker_created,
     notify_tracker_updated,
@@ -156,13 +158,24 @@ def list_trackers(request):
             id_municipio=OuterRef('municipio')
         ).values('municipio')[:1]
 
+        nombre_proveedor_subquery = Proveedor.objects.filter(
+            id=OuterRef('proveedor')
+        ).values('nombre')[:1]
+        
+        nombre_cliente_subquery = Cliente.objects.filter(
+            id=OuterRef('cliente')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation (filtrado por estado_modulo=2 para Tracker)
         trackers = Preparacion.objects.select_related(
             'usuario', 'departamento', 'municipio', 'proveedor'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
-            nombre_muni=Subquery(nombre_muni_subquery)
+            nombre_muni=Subquery(nombre_muni_subquery),
+            nombre_proveedor=Subquery(nombre_proveedor_subquery),
+            nombre_cliente=Subquery(nombre_cliente_subquery)
         ).filter(estado_modulo=2)  # CRÍTICO: Solo registros del módulo Tracker
+
 
         # --- Filtros ---
         # Filtro de búsqueda general
@@ -243,6 +256,8 @@ def list_trackers(request):
                 'municipio': tracker.municipio_id,
                 'nombre_depto': tracker.nombre_depto,
                 'nombre_muni': tracker.nombre_muni,
+                'nombre_proveedor': tracker.nombre_proveedor,
+                'nombre_cliente': tracker.nombre_cliente,
                 'estado': tracker.estado,
                 'estado_detalle': tracker.estado_detalle,
                 'estado_tracker': tracker.estado_tracker,
