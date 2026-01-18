@@ -15,6 +15,7 @@ from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
 from clientes.models import Cliente
+from tramites.models import Tramite
 from finalizados.websocket.utils import (
     notify_finalizado_created,
     notify_finalizado_updated,
@@ -162,13 +163,18 @@ def list_finalizados(request):
             id=OuterRef('cliente')
         ).values('nombre')[:1]
 
+        nombre_tramite_subquery = Tramite.objects.filter(
+            id=OuterRef('tramite')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation (filtrado por estado_modulo=3 para finalizado)
         finalizados = Preparacion.objects.select_related(
-            'usuario', 'departamento', 'municipio', 'proveedor'
+            'usuario', 'departamento', 'municipio', 'proveedor', 'tramite'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
-            nombre_cliente=Subquery(nombre_cliente_subquery)
+            nombre_cliente=Subquery(nombre_cliente_subquery),
+            nombre_tramite=Subquery(nombre_tramite_subquery)
         ).filter(estado_modulo=3)  # CRÍTICO: Solo registros del módulo Finalizados
 
         # --- Filtros ---
@@ -250,6 +256,8 @@ def list_finalizados(request):
                 'municipio': finalizado.municipio_id,
                 'nombre_depto': finalizado.nombre_depto,
                 'nombre_muni': finalizado.nombre_muni,
+                'tramite_id': finalizado.tramite_id,
+                'nombre_tramite': finalizado.nombre_tramite,
                 'nombre_cliente': finalizado.nombre_cliente,
                 'estado': finalizado.estado,
                 'estado_detalle': finalizado.estado_detalle,
@@ -289,6 +297,7 @@ def get_finalizado(request, pk):
             "tipo_vehiculo": finalizado.tipo_vehiculo,
             "departamento": finalizado.departamento_id,
             "municipio": finalizado.municipio_id,
+            "tramite_id": finalizado.tramite_id,
             "estado": finalizado.estado,
             "estado_tracker": finalizado.estado_tracker,
             "estado_detalle": finalizado.estado_detalle,
@@ -337,6 +346,8 @@ def update_finalizado(request, pk):
             finalizado.departamento_id = data.get('departamento')
         if 'municipio' in data:
             finalizado.municipio_id = data.get('municipio')
+        if 'tramite_id' in data:
+            finalizado.tramite_id = data.get('tramite_id')
         if 'proveedor' in data:
             finalizado.proveedor_id = data.get('proveedor')
 
@@ -360,6 +371,8 @@ def update_finalizado(request, pk):
             'estado_detalle': finalizado.estado_detalle,
             'fecha_recepcion_municipio': finalizado.fecha_recepcion_municipio.isoformat() if finalizado.fecha_recepcion_municipio else None,
             'hace_dias': finalizado.hace_dias,
+            'tramite_id': finalizado.tramite_id,
+            'tramite_nombre': finalizado.tramite.nombre if finalizado.tramite else None,
             'proveedor_id': finalizado.proveedor_id,
             'codigo_encargado': finalizado.codigo_encargado,
             'proveedor_nombre': finalizado.proveedor.nombre if finalizado.proveedor else None,

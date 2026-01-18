@@ -4,6 +4,7 @@ from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
 from clientes.models import Cliente
+from tramites.models import Tramite
 from simple_history.models import HistoricalRecords
 
 # Create your models here.
@@ -103,6 +104,17 @@ class Preparacion(models.Model):
         blank=True,
         help_text="Cliente asociado al trámite"
     )
+
+    tramite = models.ForeignKey(
+        Tramite,
+        on_delete=models.PROTECT,
+        related_name='tramites_preparacion',
+        db_column='tramite_id',
+        null=True,
+        blank=True,
+        help_text="Trámite asociado"
+    )
+
 
     # Estado del trámite
     estado = models.CharField(

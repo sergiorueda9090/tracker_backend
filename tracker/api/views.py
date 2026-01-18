@@ -15,6 +15,7 @@ from departamentos.models import Departamento
 from municipios.models import Municipio
 from clientes.models import Cliente
 from proveedores.models import Proveedor
+from tramites.models import Tramite
 from transitotarifas.models import TransitoTarifa, TransitoTarifaTramite, TransitoTarifaGestor
 from tracker.websocket.utils import (
     notify_tracker_created,
@@ -111,6 +112,8 @@ def create_tracker(request):
                 'municipio': tracker.municipio_id,
                 'nombre_depto': tracker.departamento.departamento if tracker.departamento else None,
                 'nombre_muni': tracker.municipio.municipio if tracker.municipio else None,
+                'tramite_id': tracker.tramite_id,
+                'tramite_nombre': tracker.tramite.nombre if tracker.tramite else None,
                 'estado': tracker.estado,
                 'estado_detalle': tracker.estado_detalle,
                 'fecha_recepcion_municipio': tracker.fecha_recepcion_municipio.isoformat() if tracker.fecha_recepcion_municipio else None,
@@ -166,14 +169,19 @@ def list_trackers(request):
             id=OuterRef('cliente')
         ).values('nombre')[:1]
 
+        nombre_tramite_subquery = Tramite.objects.filter(
+            id=OuterRef('tramite')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation (filtrado por estado_modulo=2 para Tracker)
         trackers = Preparacion.objects.select_related(
-            'usuario', 'departamento', 'municipio', 'proveedor'
+            'usuario', 'departamento', 'municipio', 'proveedor', 'tramite'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
             nombre_proveedor=Subquery(nombre_proveedor_subquery),
-            nombre_cliente=Subquery(nombre_cliente_subquery)
+            nombre_cliente=Subquery(nombre_cliente_subquery),
+            nombre_tramite=Subquery(nombre_tramite_subquery)
         ).filter(estado_modulo=2)  # CRÍTICO: Solo registros del módulo Tracker
 
 
@@ -256,6 +264,8 @@ def list_trackers(request):
                 'municipio': tracker.municipio_id,
                 'nombre_depto': tracker.nombre_depto,
                 'nombre_muni': tracker.nombre_muni,
+                'tramite_id': tracker.tramite_id,
+                'nombre_tramite': tracker.nombre_tramite,
                 'nombre_proveedor': tracker.nombre_proveedor,
                 'nombre_cliente': tracker.nombre_cliente,
                 'estado': tracker.estado,
@@ -296,6 +306,7 @@ def get_tracker(request, pk):
             "tipo_vehiculo": tracker.tipo_vehiculo,
             "departamento": tracker.departamento_id,
             "municipio": tracker.municipio_id,
+            "tramite_id": tracker.tramite_id,
             "estado": tracker.estado,
             "estado_tracker": tracker.estado_tracker,
             "estado_detalle": tracker.estado_detalle,
@@ -344,6 +355,8 @@ def update_tracker(request, pk):
             tracker.departamento_id = data.get('departamento')
         if 'municipio' in data:
             tracker.municipio_id = data.get('municipio')
+        if 'tramite_id' in data:
+            tracker.tramite_id = data.get('tramite_id')
         if 'proveedor' in data:
             tracker.proveedor_id = data.get('proveedor')
 
@@ -367,6 +380,8 @@ def update_tracker(request, pk):
             'estado_detalle': tracker.estado_detalle,
             'fecha_recepcion_municipio': tracker.fecha_recepcion_municipio.isoformat() if tracker.fecha_recepcion_municipio else None,
             'hace_dias': tracker.hace_dias,
+            'tramite_id': tracker.tramite_id,
+            'tramite_nombre': tracker.tramite.nombre if tracker.tramite else None,
             'proveedor_id': tracker.proveedor_id,
             'codigo_encargado': tracker.codigo_encargado,
             'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
@@ -517,6 +532,8 @@ def finalizar_tracker(request, pk):
                 'municipio': tracker.municipio_id,
                 'nombre_depto': tracker.departamento.departamento if tracker.departamento else None,
                 'nombre_muni': tracker.municipio.municipio if tracker.municipio else None,
+                'tramite_id': tracker.tramite_id,
+                'tramite_nombre': tracker.tramite.nombre if tracker.tramite else None,
                 'estado': tracker.estado,
                 'estado_tracker': tracker.estado_tracker,
                 'estado_detalle': tracker.estado_detalle,

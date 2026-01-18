@@ -14,6 +14,7 @@ from user.api.permissions import RolePermission
 from departamentos.models import Departamento
 from municipios.models import Municipio
 from proveedores.models import Proveedor
+from tramites.models import Tramite
 from archivadas.websocket.utils import (
     notify_archivada_created,
     notify_archivada_updated,
@@ -156,12 +157,17 @@ def list_archivadas(request):
             id_municipio=OuterRef('municipio')
         ).values('municipio')[:1]
 
+        nombre_tramite_subquery = Tramite.objects.filter(
+            id=OuterRef('tramite')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation (filtrado por estado_modulo=0 para archivada)
         archivadas = Preparacion.objects.select_related(
-            'usuario', 'departamento', 'municipio', 'proveedor'
+            'usuario', 'departamento', 'municipio', 'proveedor', 'tramite'
         ).annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
-            nombre_muni=Subquery(nombre_muni_subquery)
+            nombre_muni=Subquery(nombre_muni_subquery),
+            nombre_tramite=Subquery(nombre_tramite_subquery)
         ).filter(estado_modulo=0)  # CRÍTICO: Solo registros del módulo archivada
 
         # --- Filtros ---
@@ -243,6 +249,8 @@ def list_archivadas(request):
                 'municipio': archivada.municipio_id,
                 'nombre_depto': archivada.nombre_depto,
                 'nombre_muni': archivada.nombre_muni,
+                'tramite_id': archivada.tramite_id,
+                'nombre_tramite': archivada.nombre_tramite,
                 'estado': archivada.estado,
                 'estado_detalle': archivada.estado_detalle,
                 'fecha_recepcion_municipio': archivada.fecha_recepcion_municipio,
@@ -280,6 +288,7 @@ def get_archivada(request, pk):
             "tipo_vehiculo": archivada.tipo_vehiculo,
             "departamento": archivada.departamento_id,
             "municipio": archivada.municipio_id,
+            "tramite_id": archivada.tramite_id,
             "estado": archivada.estado,
             "estado_detalle": archivada.estado_detalle,
             "fecha_recepcion_municipio": archivada.fecha_recepcion_municipio,
@@ -326,6 +335,8 @@ def update_archivada(request, pk):
             archivada.departamento_id = data.get('departamento')
         if 'municipio' in data:
             archivada.municipio_id = data.get('municipio')
+        if 'tramite_id' in data:
+            archivada.tramite_id = data.get('tramite_id')
         if 'proveedor' in data:
             archivada.proveedor_id = data.get('proveedor')
 
@@ -348,6 +359,8 @@ def update_archivada(request, pk):
             'estado_detalle': archivada.estado_detalle,
             'fecha_recepcion_municipio': archivada.fecha_recepcion_municipio.isoformat() if archivada.fecha_recepcion_municipio else None,
             'hace_dias': archivada.hace_dias,
+            'tramite_id': archivada.tramite_id,
+            'tramite_nombre': archivada.tramite.nombre if archivada.tramite else None,
             'proveedor_id': archivada.proveedor_id,
             'codigo_encargado': archivada.codigo_encargado,
             'proveedor_nombre': archivada.proveedor.nombre if archivada.proveedor else None,

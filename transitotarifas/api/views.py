@@ -464,3 +464,80 @@ def delete_transito_tarifa(request, pk):
             {"error": f"Error al eliminar tránsito tarifa: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ✅ Listar trámites por ubicación (departamento y municipio)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_tramites_by_location(request):
+    try:
+        departamento_id = request.query_params.get('departamento_id', None)
+        municipio_id = request.query_params.get('municipio_id', None)
+
+        # Validaciones
+        if not departamento_id:
+            return Response(
+                {"error": "El departamento_id es requerido."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not municipio_id:
+            return Response(
+                {"error": "El municipio_id es requerido."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Buscar la TransitoTarifa que coincida con departamento y municipio
+        transito_tarifa = TransitoTarifa.objects.select_related(
+            'departamento', 'municipio'
+        ).prefetch_related(
+            'tramites__tramite',
+            'tramites__gestores__proveedor'
+        ).filter(
+            departamento_id=departamento_id,
+            municipio_id=municipio_id,
+            is_active=True
+        ).first()
+
+        if not transito_tarifa:
+            return Response(
+                {"error": "No se encontró configuración de tarifas para este departamento y municipio."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Serializar los trámites
+        tramites_data = []
+        for tramite_tarifa in transito_tarifa.tramites.all():
+            gestores_data = []
+            for gestor in tramite_tarifa.gestores.all():
+                gestores_data.append({
+                    'proveedor_id': gestor.proveedor.id,
+                    'proveedor_nombre': gestor.proveedor.nombre,
+                    'proveedor_codigo': gestor.proveedor.codigo_encargado,
+                    'servicio_gestor': str(gestor.servicio_gestor),
+                    'servicio_empresa': str(gestor.servicio_empresa),
+                })
+
+            tramites_data.append({
+                'tramite_id': tramite_tarifa.tramite.id,
+                'tramite_nombre': tramite_tarifa.tramite.nombre,
+                'derechos_2026': str(tramite_tarifa.derechos_2026),
+                'gestores': gestores_data,
+            })
+
+        response_data = {
+            'transito_tarifa_id': transito_tarifa.id,
+            'departamento_id': transito_tarifa.departamento.id_departamento,
+            'departamento_nombre': transito_tarifa.departamento.departamento,
+            'municipio_id': transito_tarifa.municipio.id_municipio,
+            'municipio_nombre': transito_tarifa.municipio.municipio,
+            'tramites': tramites_data,
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": f"Error al obtener trámites: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

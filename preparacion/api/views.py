@@ -16,6 +16,7 @@ from departamentos.models import Departamento
 from municipios.models import Municipio
 from clientes.models import Cliente
 from proveedores.models import Proveedor
+from tramites.models import Tramite
 from preparacion.websocket.utils import (
     notify_preparacion_created,
     notify_preparacion_updated,
@@ -50,23 +51,25 @@ def create_tramite(request):
             tipo_vehiculo   = data.get('tipo_vehiculo')
             departamento_id = data.get('departamento')
             municipio_id    = data.get('municipio')
+            tramite_id      = data.get('tramite_id', None)
             proveedor_id    = data.get('proveedor_id', None)
             cliente_id      = data.get('cliente_id', None)
             estado_modulo   = 1
 
-            if not all([placa, tipo_vehiculo, departamento_id, municipio_id, proveedor_id, cliente_id]):
+            if not all([placa, tipo_vehiculo, departamento_id, municipio_id, tramite_id, proveedor_id, cliente_id]):
                 return Response(
-                    {"error": "Placa, tipo de vehículo, proveedor, departamento, municipio y cliente son requeridos."},
+                    {"error": "Placa, tipo de vehículo, trámite, proveedor, departamento, municipio y cliente son requeridos."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             # 3. Crear el trámite
-            tramite = Preparacion.objects.create(
+            preparacion = Preparacion.objects.create(
                 usuario=request.user,
                 placa=placa.upper(),
                 tipo_vehiculo=tipo_vehiculo,
                 departamento_id=departamento_id,
                 municipio_id=municipio_id,
+                tramite_id=tramite_id,
                 proveedor_id=proveedor_id,
                 cliente_id=cliente_id,
                 estado=data.get('estado', 'en_verificacion'),
@@ -80,61 +83,63 @@ def create_tramite(request):
             if 'archivos' in request.FILES:
                 files = request.FILES.getlist('archivos')
                 tipos_permitidos = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']
-                
+
                 for f in files:
                     if f.content_type not in tipos_permitidos:
                         raise ValueError(f"Archivo {f.name} no permitido.")
 
                     # Crear el registro en la base de datos
                     archivo_obj = PreparacionArchivo.objects.create(
-                        tramite=tramite,
+                        tramite=preparacion,
                         archivo=f,
                         nombre_original=f.name,
                         tipo_archivo=f.content_type,
                         tamaño=f.size
                     )
-                    
+
                     archivos_subidos.append({
                         "id": archivo_obj.id,
                         "nombre": archivo_obj.nombre_original,
                         "url": archivo_obj.archivo.url
                     })
-            
+
             # 5.Construir datos manualmente para WebSocket 🔥
-            tramite_data = {
-                'id': tramite.id,
-                'placa': tramite.placa,
-                'tipo_vehiculo': tramite.tipo_vehiculo,
-                'departamento': tramite.departamento_id,
-                'municipio': tramite.municipio_id,
-                'proveedor': tramite.proveedor_id,
-                'cliente': tramite.cliente_id,
-                'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
-                'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
-                'estado': tramite.estado,
-                'paquete': tramite.paquete,
-                'lista_documentos': tramite.lista_documentos,
-                'usuario': tramite.usuario.username if tramite.usuario else 'Sin asignar',
-                'documentos_completos': tramite.documentos_completos,
-                'documentos_completados': tramite.documentos_completados,
-                'total_documentos': tramite.total_documentos,
-                'created_at': tramite.created_at.isoformat(),
-                'updated_at': tramite.updated_at.isoformat(),
+            preparacion_data = {
+                'id': preparacion.id,
+                'placa': preparacion.placa,
+                'tipo_vehiculo': preparacion.tipo_vehiculo,
+                'departamento': preparacion.departamento_id,
+                'municipio': preparacion.municipio_id,
+                'tramite_id': preparacion.tramite_id,
+                'tramite_nombre': preparacion.tramite.nombre if preparacion.tramite else None,
+                'proveedor': preparacion.proveedor_id,
+                'cliente': preparacion.cliente_id,
+                'nombre_depto': preparacion.departamento.departamento if preparacion.departamento else None,
+                'nombre_muni': preparacion.municipio.municipio if preparacion.municipio else None,
+                'estado': preparacion.estado,
+                'paquete': preparacion.paquete,
+                'lista_documentos': preparacion.lista_documentos,
+                'usuario': preparacion.usuario.username if preparacion.usuario else 'Sin asignar',
+                'documentos_completos': preparacion.documentos_completos,
+                'documentos_completados': preparacion.documentos_completados,
+                'total_documentos': preparacion.total_documentos,
+                'created_at': preparacion.created_at.isoformat(),
+                'updated_at': preparacion.updated_at.isoformat(),
                 'archivos': archivos_subidos,
                 'total_archivos': len(archivos_subidos)
             }
-            
+
             # 6. 🔥 NOTIFICAR VÍA WEBSOCKET 🔥
             try:
-                notify_preparacion_created(tramite_data)
+                notify_preparacion_created(preparacion_data)
             except Exception as ws_error:
                 # Si WebSocket falla, solo registrar el error pero continuar
                 print(f"⚠️ WebSocket notification failed: {type(ws_error).__name__}")
 
             return Response({
-                "id": tramite.id,
-                "placa": tramite.placa,
-                "estado": tramite.estado,
+                "id": preparacion.id,
+                "placa": preparacion.placa,
+                "estado": preparacion.estado,
                 "archivos": archivos_subidos
             }, status=status.HTTP_201_CREATED)
 
@@ -175,13 +180,18 @@ def list_tramites(request):
             id=OuterRef('cliente')
         ).values('nombre')[:1]
 
+        nombre_tramite_subquery = Tramite.objects.filter(
+            id=OuterRef('tramite')
+        ).values('nombre')[:1]
+
         # 2. QuerySet Base con Annotation
-        tramites = Preparacion.objects.select_related('usuario', 'departamento', 'municipio', 'proveedor').annotate(
+        tramites = Preparacion.objects.select_related('usuario', 'departamento', 'municipio', 'proveedor', 'tramite').annotate(
             nombre_depto=Subquery(nombre_depto_subquery),
             nombre_muni=Subquery(nombre_muni_subquery),
             nombre_usuario=Subquery(nombre_usuario_subquery),
             nombre_proveedor=Subquery(nombre_proveedor_subquery),
-            nombre_cliente=Subquery(nombre_cliente_subquery)
+            nombre_cliente=Subquery(nombre_cliente_subquery),
+            nombre_tramite=Subquery(nombre_tramite_subquery)
         ).all().filter(estado_modulo=1)
 
         # --- Filtro de Buscador (Search) ---
@@ -260,6 +270,8 @@ def list_tramites(request):
                 'municipio': tramite.municipio_id,
                 'nombre_depto': tramite.nombre_depto,
                 'nombre_muni': tramite.nombre_muni,
+                'tramite_id': tramite.tramite_id,
+                'nombre_tramite': tramite.nombre_tramite,
                 'nombre_proveedor': tramite.nombre_proveedor,
                 'nombre_cliente': tramite.nombre_cliente,
                 'estado': tramite.estado,
@@ -312,9 +324,10 @@ def get_tramite(request, pk):
             "placa": tramite.placa,
             "tipo_vehiculo": tramite.tipo_vehiculo,
             "departamento": tramite.departamento_id,
+            "municipio": tramite.municipio_id,
+            "tramite_id": tramite.tramite_id,
             "proveedor_id": tramite.proveedor_id,
             "cliente_id": tramite.cliente_id,
-            "municipio": tramite.municipio_id,
             "estado": tramite.estado,
             "paquete": tramite.paquete,
             "lista_documentos": tramite.lista_documentos,
@@ -361,6 +374,8 @@ def update_tramite(request, pk):
             tramite.departamento_id = data.get('departamento')
         if 'municipio' in data:
             tramite.municipio_id = data.get('municipio')
+        if 'tramite_id' in data:
+            tramite.tramite_id = data.get('tramite_id')
 
         tramite.save()
 
@@ -438,6 +453,8 @@ def update_tramite(request, pk):
             'usuario': tramite.usuario.username if tramite.usuario else 'Sin asignar',
             'departamento': tramite.departamento_id,
             'municipio': tramite.municipio_id,
+            'tramite_id': tramite.tramite_id,
+            'tramite_nombre': tramite.tramite.nombre if tramite.tramite else None,
             'proveedor': tramite.proveedor_id,
             'cliente': tramite.cliente_id,
             'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
@@ -630,14 +647,14 @@ def send_to_tracker(request, pk):
                 )
 
             # 3. Obtener datos adicionales para tracker
-            proveedor_id = request.data.get('proveedor')  # Opcional
+            #proveedor_id = request.data.get('proveedor')  # Opcional
             fecha_recepcion = request.data.get('fecha_recepcion_municipio')  # Opcional
 
             # 4. Actualizar a módulo Tracker
             preparacion.estado_modulo = 2  # Cambiar a Tracker
             #preparacion.estado         = 'en_radicacion'  # Estado inicial de tracker
             preparacion.estado_tracker = 'en_radicacion'  # Estado específico de tracker
-            preparacion.proveedor_id = proveedor_id if proveedor_id else None
+            #preparacion.proveedor_id = proveedor_id if proveedor_id else None
 
             if fecha_recepcion:
                 preparacion.fecha_recepcion_municipio = datetime.strptime(fecha_recepcion, '%Y-%m-%d').date()
