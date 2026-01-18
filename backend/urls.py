@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/archivadas/',       include('archivadas.api.urls'), name="archivadas"),
     path('api/tramites/',         include('tramites.api.urls'), name="tramites"),
     path('api/transitotarifas/',  include('transitotarifas.api.urls'), name="transitotarifas"),
+    path('api/liquidacion/',      include('liquidacion.api.urls'), name="liquidacion"),
     path('test-websocket/',       views.test_websocket, name='test_websocket'),
 ]
 

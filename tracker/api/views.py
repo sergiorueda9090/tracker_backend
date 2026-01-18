@@ -488,18 +488,20 @@ def get_tracker_history(request, pk):
         )
 
 
-# ✅ Finalizar trámite (mover de Tracker a Finalizados)
+# ✅ Finalizar trámite (mover de Tracker a Finalizados y crear Liquidación)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, RolePermission(['admin'])])
 def finalizar_tracker(request, pk):
     """
     Finaliza un trámite en Tracker y lo transfiere automáticamente al módulo Finalizados.
+    También crea automáticamente un registro de liquidación con las tarifas configuradas.
 
     Flujo:
     1. Cambia estado_modulo de 2 (Tracker) a 3 (Finalizados)
     2. Actualiza estado_tracker a 'finalizado'
-    3. Emite WebSocket a Tracker (eliminación)
-    4. Emite WebSocket a Finalizados (creación)
+    3. Crea registro de Liquidación con tarifas
+    4. Emite WebSocket a Tracker (eliminación)
+    5. Emite WebSocket a Finalizados (creación)
     """
     try:
         with transaction.atomic():
@@ -523,7 +525,57 @@ def finalizar_tracker(request, pk):
 
             tracker.save()
 
-            # 4. Construir datos completos para el módulo Finalizados (WebSocket)
+            # 4. Crear registro de Liquidación
+            from liquidacion.models import Liquidacion
+            from decimal import Decimal
+
+            # Valores por defecto de las tarifas
+            derechos_tramite = Decimal('0.00')
+            servicio_empresa = Decimal('0.00')
+            servicio_gestor = Decimal('0.00')
+
+            # Buscar configuración de tarifas si existe
+            if tracker.departamento_id and tracker.municipio_id and tracker.tramite_id and tracker.proveedor_id:
+                try:
+                    # Buscar la tarifa configurada
+                    tarifa_gestor = TransitoTarifaGestor.objects.select_related(
+                        'tramite_tarifa__transito_tarifa',
+                        'tramite_tarifa__tramite'
+                    ).filter(
+                        tramite_tarifa__transito_tarifa__departamento_id=tracker.departamento_id,
+                        tramite_tarifa__transito_tarifa__municipio_id=tracker.municipio_id,
+                        tramite_tarifa__tramite_id=tracker.tramite_id,
+                        proveedor_id=tracker.proveedor_id,
+                        tramite_tarifa__transito_tarifa__is_active=True
+                    ).first()
+
+                    if tarifa_gestor:
+                        derechos_tramite = tarifa_gestor.tramite_tarifa.derechos_2026
+                        servicio_empresa = tarifa_gestor.servicio_empresa
+                        servicio_gestor = tarifa_gestor.servicio_gestor
+                except Exception as tarifa_error:
+                    print(f"⚠️ No se encontró configuración de tarifas: {tarifa_error}")
+
+            # Crear el registro de liquidación
+            liquidacion = Liquidacion.objects.create(
+                preparacion=tracker,
+                tramite_id=tracker.tramite_id,
+                proveedor_id=tracker.proveedor_id,
+                cliente_id=tracker.cliente_id,
+                departamento_id=tracker.departamento_id,
+                municipio_id=tracker.municipio_id,
+                placa=tracker.placa,
+                tipo_vehiculo=tracker.tipo_vehiculo,
+                derechos_tramite=derechos_tramite,
+                servicio_empresa=servicio_empresa,
+                servicio_gestor=servicio_gestor,
+                transporte=Decimal('0.00'),
+                bonificacion=Decimal('0.00'),
+                anticipos=Decimal('0.00'),
+                estado='pendiente',
+            )
+
+            # 5. Construir datos completos para el módulo Finalizados (WebSocket)
             finalizado_data = {
                 'id': tracker.id,
                 'placa': tracker.placa,
@@ -545,13 +597,15 @@ def finalizar_tracker(request, pk):
                 'usuario': tracker.usuario.username if tracker.usuario else 'Sin asignar',
                 'created_at': tracker.created_at.isoformat(),
                 'updated_at': tracker.updated_at.isoformat(),
+                # Datos de liquidación
+                'liquidacion_id': liquidacion.id,
             }
 
-            # 5. Emitir notificaciones WebSocket
-            # 5.1. Notificar al módulo Tracker que el registro fue eliminado
+            # 6. Emitir notificaciones WebSocket
+            # 6.1. Notificar al módulo Tracker que el registro fue eliminado
             notify_tracker_deleted(tracker_data_before['id'], tracker_data_before['placa'])
 
-            # 5.2. Notificar al módulo Finalizados que se creó un nuevo registro
+            # 6.2. Notificar al módulo Finalizados que se creó un nuevo registro
             from finalizados.websocket.utils import notify_finalizado_created
             notify_finalizado_created(finalizado_data)
 
@@ -561,6 +615,7 @@ def finalizar_tracker(request, pk):
                 "placa": tracker.placa,
                 "estado_modulo": tracker.estado_modulo,
                 "estado_tracker": tracker.estado_tracker,
+                "liquidacion_id": liquidacion.id,
             }, status=status.HTTP_200_OK)
 
     except Exception as e:
