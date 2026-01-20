@@ -506,7 +506,18 @@ def archivar_finalizado(request, pk):
             finalizado.estado_modulo = 0  # Mover a Archivadas
             finalizado.save()
 
-            # 4. Construir datos completos para el módulo Archivadas (WebSocket)
+            # 4. Obtener archivos del trámite
+            archivos = finalizado.archivos.all()
+            archivos_list = [{
+                "id": arch.id,
+                "nombre": arch.nombre_original,
+                "tipo": arch.tipo_archivo,
+                "tamaño": arch.tamaño,
+                "url": arch.archivo.url,
+                "created_at": arch.created_at.isoformat()
+            } for arch in archivos]
+
+            # 5. Construir datos completos para el módulo Archivadas (WebSocket)
             archivada_data = {
                 'id': finalizado.id,
                 'placa': finalizado.placa,
@@ -515,16 +526,22 @@ def archivar_finalizado(request, pk):
                 'municipio': finalizado.municipio_id,
                 'nombre_depto': finalizado.departamento.departamento if finalizado.departamento else None,
                 'nombre_muni': finalizado.municipio.municipio if finalizado.municipio else None,
+                'tramite_id': finalizado.tramite_id,
+                'nombre_tramite': finalizado.tramite.nombre if finalizado.tramite else None,
+                'cliente_id': finalizado.cliente_id,
+                'nombre_cliente': finalizado.cliente.nombre if finalizado.cliente else None,
                 'estado': finalizado.estado,
                 'estado_detalle': finalizado.estado_detalle,
                 'fecha_recepcion_municipio': finalizado.fecha_recepcion_municipio.isoformat() if finalizado.fecha_recepcion_municipio else None,
                 'hace_dias': finalizado.hace_dias,
                 'proveedor_id': finalizado.proveedor_id,
                 'codigo_encargado': finalizado.codigo_encargado,
-                'proveedor_nombre': finalizado.proveedor.nombre if finalizado.proveedor else None,
+                'nombre_proveedor': finalizado.proveedor.nombre if finalizado.proveedor else None,
                 'usuario': finalizado.usuario.username if finalizado.usuario else 'Sin asignar',
                 'created_at': finalizado.created_at.isoformat(),
                 'updated_at': finalizado.updated_at.isoformat(),
+                'archivos': archivos_list,
+                'total_archivos': len(archivos_list),
             }
 
             # 5. Emitir notificaciones WebSocket

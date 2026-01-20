@@ -575,7 +575,18 @@ def finalizar_tracker(request, pk):
                 estado='pendiente',
             )
 
-            # 5. Construir datos completos para el módulo Finalizados (WebSocket)
+            # 5. Obtener archivos del trámite
+            archivos = tracker.archivos.all()
+            archivos_list = [{
+                "id": arch.id,
+                "nombre": arch.nombre_original,
+                "tipo": arch.tipo_archivo,
+                "tamaño": arch.tamaño,
+                "url": arch.archivo.url,
+                "created_at": arch.created_at.isoformat()
+            } for arch in archivos]
+
+            # 6. Construir datos completos para el módulo Finalizados (WebSocket)
             finalizado_data = {
                 'id': tracker.id,
                 'placa': tracker.placa,
@@ -585,7 +596,9 @@ def finalizar_tracker(request, pk):
                 'nombre_depto': tracker.departamento.departamento if tracker.departamento else None,
                 'nombre_muni': tracker.municipio.municipio if tracker.municipio else None,
                 'tramite_id': tracker.tramite_id,
-                'tramite_nombre': tracker.tramite.nombre if tracker.tramite else None,
+                'nombre_tramite': tracker.tramite.nombre if tracker.tramite else None,
+                'cliente_id': tracker.cliente_id,
+                'nombre_cliente': tracker.cliente.nombre if tracker.cliente else None,
                 'estado': tracker.estado,
                 'estado_tracker': tracker.estado_tracker,
                 'estado_detalle': tracker.estado_detalle,
@@ -593,10 +606,12 @@ def finalizar_tracker(request, pk):
                 'hace_dias': tracker.hace_dias,
                 'proveedor_id': tracker.proveedor_id,
                 'codigo_encargado': tracker.codigo_encargado,
-                'proveedor_nombre': tracker.proveedor.nombre if tracker.proveedor else None,
+                'nombre_proveedor': tracker.proveedor.nombre if tracker.proveedor else None,
                 'usuario': tracker.usuario.username if tracker.usuario else 'Sin asignar',
                 'created_at': tracker.created_at.isoformat(),
                 'updated_at': tracker.updated_at.isoformat(),
+                'archivos': archivos_list,
+                'total_archivos': len(archivos_list),
                 # Datos de liquidación
                 'liquidacion_id': liquidacion.id,
             }

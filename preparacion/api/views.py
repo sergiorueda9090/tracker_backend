@@ -111,9 +111,11 @@ def create_tramite(request):
                 'departamento': preparacion.departamento_id,
                 'municipio': preparacion.municipio_id,
                 'tramite_id': preparacion.tramite_id,
-                'tramite_nombre': preparacion.tramite.nombre if preparacion.tramite else None,
+                'nombre_tramite': preparacion.tramite.nombre if preparacion.tramite else None,
                 'proveedor': preparacion.proveedor_id,
+                'nombre_proveedor': preparacion.proveedor.nombre if preparacion.proveedor else None,
                 'cliente': preparacion.cliente_id,
+                'nombre_cliente': preparacion.cliente.nombre if preparacion.cliente else None,
                 'nombre_depto': preparacion.departamento.departamento if preparacion.departamento else None,
                 'nombre_muni': preparacion.municipio.municipio if preparacion.municipio else None,
                 'estado': preparacion.estado,
@@ -325,16 +327,25 @@ def get_tramite(request, pk):
             "tipo_vehiculo": tramite.tipo_vehiculo,
             "departamento": tramite.departamento_id,
             "municipio": tramite.municipio_id,
+            "nombre_depto": tramite.departamento.departamento if tramite.departamento else None,
+            "nombre_muni": tramite.municipio.municipio if tramite.municipio else None,
             "tramite_id": tramite.tramite_id,
+            "nombre_tramite": tramite.tramite.nombre if tramite.tramite else None,
             "proveedor_id": tramite.proveedor_id,
+            "nombre_proveedor": tramite.proveedor.nombre if tramite.proveedor else None,
             "cliente_id": tramite.cliente_id,
+            "nombre_cliente": tramite.cliente.nombre if tramite.cliente else None,
             "estado": tramite.estado,
             "paquete": tramite.paquete,
             "lista_documentos": tramite.lista_documentos,
             "usuario": tramite.usuario.username if tramite.usuario else 'Sin asignar',
+            "documentos_completos": tramite.documentos_completos,
+            "documentos_completados": tramite.documentos_completados,
+            "total_documentos": tramite.total_documentos,
             "created_at": tramite.created_at,
             "updated_at": tramite.updated_at,
             "archivos": archivos_list,
+            "total_archivos": len(archivos_list),
         }
         return Response(data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -454,9 +465,11 @@ def update_tramite(request, pk):
             'departamento': tramite.departamento_id,
             'municipio': tramite.municipio_id,
             'tramite_id': tramite.tramite_id,
-            'tramite_nombre': tramite.tramite.nombre if tramite.tramite else None,
+            'nombre_tramite': tramite.tramite.nombre if tramite.tramite else None,
             'proveedor': tramite.proveedor_id,
+            'nombre_proveedor': tramite.proveedor.nombre if tramite.proveedor else None,
             'cliente': tramite.cliente_id,
+            'nombre_cliente': tramite.cliente.nombre if tramite.cliente else None,
             'nombre_depto': tramite.departamento.departamento if tramite.departamento else None,
             'nombre_muni': tramite.municipio.municipio if tramite.municipio else None,
             'documentos_completos': tramite.documentos_completos,
@@ -661,7 +674,18 @@ def send_to_tracker(request, pk):
 
             preparacion.save()
 
-            # 5. Preparar datos para WebSocket
+            # 5. Obtener archivos del trámite
+            archivos = preparacion.archivos.all()
+            archivos_list = [{
+                "id": arch.id,
+                "nombre": arch.nombre_original,
+                "tipo": arch.tipo_archivo,
+                "tamaño": arch.tamaño,
+                "url": arch.archivo.url,
+                "created_at": arch.created_at.isoformat()
+            } for arch in archivos]
+
+            # 6. Preparar datos para WebSocket
             tracker_data = {
                 'id': preparacion.id,
                 'placa': preparacion.placa,
@@ -670,16 +694,22 @@ def send_to_tracker(request, pk):
                 'municipio': preparacion.municipio_id,
                 'nombre_depto': preparacion.departamento.departamento if preparacion.departamento else None,
                 'nombre_muni': preparacion.municipio.municipio if preparacion.municipio else None,
+                'tramite_id': preparacion.tramite_id,
+                'nombre_tramite': preparacion.tramite.nombre if preparacion.tramite else None,
+                'cliente_id': preparacion.cliente_id,
+                'nombre_cliente': preparacion.cliente.nombre if preparacion.cliente else None,
                 'estado_tracker': preparacion.estado_tracker,
                 'estado_detalle': preparacion.estado_detalle or '',
                 'fecha_recepcion_municipio': preparacion.fecha_recepcion_municipio.isoformat() if preparacion.fecha_recepcion_municipio else None,
                 'hace_dias': preparacion.hace_dias,
                 'proveedor_id': preparacion.proveedor_id,
-                'proveedor_nombre': preparacion.proveedor.nombre if preparacion.proveedor else None,
+                'nombre_proveedor': preparacion.proveedor.nombre if preparacion.proveedor else None,
                 'codigo_encargado': preparacion.codigo_encargado,
                 'usuario': preparacion.usuario.username if preparacion.usuario else None,
                 'created_at': preparacion.created_at.isoformat(),
-                'updated_at': preparacion.updated_at.isoformat()
+                'updated_at': preparacion.updated_at.isoformat(),
+                'archivos': archivos_list,
+                'total_archivos': len(archivos_list)
             }
 
             # 6. Notificar vía WebSocket
