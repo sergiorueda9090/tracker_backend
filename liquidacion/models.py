@@ -211,7 +211,7 @@ class Liquidacion(models.Model):
     @property
     def utilidad(self):
         """Utilidad = Facturación sin IVA - Total servicio gestor"""
-        return self.total_facturacion_sin_iva - self.total_servicio_gestor
+        return self.servicio_empresa - self.total_servicio_gestor
 
     @property
     def es_rentable(self):
