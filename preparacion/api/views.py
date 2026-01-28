@@ -148,10 +148,12 @@ def create_tramite(request):
     except ValueError as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        # Aquí es donde fallaba: a veces imprimir 'e' o 'data' causa el error de pickling
-        print(f"Error detectado: {type(e).__name__}") 
+        import traceback
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"Error detectado: {error_msg}")
+        print(traceback.format_exc())
         return Response(
-            {"error": f"Error inesperado al procesar el trámite."},
+            {"error": error_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
