@@ -27,13 +27,18 @@ class Preparacion(models.Model):
         ('finalizado', 'Finalizado'),
     ]
 
-    ESTADO_TRACKER = [
-        ('sin_tracker', 'Sin Tracker'),
-        ('en_radicacion', 'En Radicación'),
-        ('con_novedad', 'Con Novedad'),
-        ('finalizado', 'Finalizado'),
-    ]
 
+    ESTADO_TRACKER = [
+        ('sin_tracker',   'Sin tracker'),
+        ('en_radicacion', 'En radicación'),
+        ('pte_agenda',    'Pendiente de agenda'),
+        ('con_novedad',   'Con novedad'),
+        ('aprobado',      'Aprobado'),
+        ('enviado',       'Enviado'),
+        ('entregado',     'Entregado'),
+        ('finalizado',    'Finalizado'),
+        ('rechazado',     'Rechazado'),
+    ]
     # Opciones de tipo de vehículo
     TIPO_VEHICULO_CHOICES = [
         ('Automóvil', 'Automóvil'),
@@ -115,6 +120,10 @@ class Preparacion(models.Model):
         help_text="Trámite asociado"
     )
 
+    descripcion = models.TextField(
+        help_text="Descripción del trámite",
+        blank=True
+    )
 
     # Estado del trámite
     estado = models.CharField(

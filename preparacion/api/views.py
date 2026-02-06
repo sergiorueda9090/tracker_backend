@@ -55,6 +55,7 @@ def create_tramite(request):
             proveedor_id    = data.get('proveedor_id', None)
             cliente_id      = data.get('cliente_id', None)
             estado_modulo   = 1
+            descripcion      = data.get('descripcion', '')
 
             if not all([placa, tipo_vehiculo, departamento_id, municipio_id, tramite_id, proveedor_id, cliente_id]):
                 return Response(
@@ -75,7 +76,8 @@ def create_tramite(request):
                 estado=data.get('estado', 'en_verificacion'),
                 paquete=data.get('paquete', ''),
                 lista_documentos=lista_docs,
-                estado_modulo=estado_modulo
+                estado_modulo=estado_modulo,
+                descripcion=descripcion
             )
 
             # 4. Procesar archivos
@@ -128,7 +130,8 @@ def create_tramite(request):
                 'created_at': preparacion.created_at.isoformat(),
                 'updated_at': preparacion.updated_at.isoformat(),
                 'archivos': archivos_subidos,
-                'total_archivos': len(archivos_subidos)
+                'total_archivos': len(archivos_subidos),
+                'descripcion': preparacion.descripcion
             }
 
             # 6. 🔥 NOTIFICAR VÍA WEBSOCKET 🔥
@@ -288,7 +291,8 @@ def list_tramites(request):
                 'created_at': tramite.created_at,
                 'updated_at': tramite.updated_at,
                 'archivos': archivos_list,
-                'total_archivos': len(archivos_list)
+                'total_archivos': len(archivos_list),
+                'descripcion': tramite.descripcion
             })
 
         # 4. Paginación
@@ -348,6 +352,7 @@ def get_tramite(request, pk):
             "updated_at": tramite.updated_at,
             "archivos": archivos_list,
             "total_archivos": len(archivos_list),
+            "descripcion": tramite.descripcion
         }
         return Response(data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -382,6 +387,7 @@ def update_tramite(request, pk):
         tramite.lista_documentos = data.get('lista_documentos', tramite.lista_documentos)
         tramite.proveedor_id = data.get('proveedor_id', tramite.proveedor_id)
         tramite.cliente_id = data.get('cliente_id', tramite.cliente_id)
+        tramite.descripcion = data.get('descripcion', tramite.descripcion)
 
         if 'departamento' in data:
             tramite.departamento_id = data.get('departamento')
@@ -480,7 +486,8 @@ def update_tramite(request, pk):
             'created_at': tramite.created_at.isoformat(),
             'updated_at': tramite.updated_at.isoformat(),
             'archivos': archivos_list,
-            'total_archivos': len(archivos_list)
+            'total_archivos': len(archivos_list),
+            'descripcion': tramite.descripcion
         }
         try:
             notify_preparacion_updated(tramite_data)
