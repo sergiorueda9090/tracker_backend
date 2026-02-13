@@ -102,7 +102,10 @@ def create_tramite(request):
                     archivos_subidos.append({
                         "id": archivo_obj.id,
                         "nombre": archivo_obj.nombre_original,
-                        "url": archivo_obj.archivo.url
+                        "tipo": archivo_obj.tipo_archivo,
+                        "tamaño": archivo_obj.tamaño,
+                        "url": archivo_obj.url_archivo,
+                        "created_at": archivo_obj.created_at.isoformat()
                     })
 
             # 5.Construir datos manualmente para WebSocket 🔥
@@ -258,14 +261,14 @@ def list_tramites(request):
         for tramite in tramites.order_by('-created_at'):
             # Obtener archivos del trámite
             archivos = tramite.archivos.all().values(
-                'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'created_at'
+                'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'url_archivo', 'created_at'
             )
             archivos_list = [{
                 "id": arch['id'],
                 "nombre": arch['nombre_original'],
                 "tipo": arch['tipo_archivo'],
                 "tamaño": arch['tamaño'],
-                "url": arch['archivo'],
+                "url": arch['url_archivo'],
                 "created_at": arch['created_at']
             } for arch in archivos]
 
@@ -316,14 +319,14 @@ def get_tramite(request, pk):
         
         # Obtener archivos del trámite
         archivos = tramite.archivos.all().values(
-            'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'created_at'
+            'id', 'nombre_original', 'tipo_archivo', 'tamaño', 'archivo', 'url_archivo','created_at'
         )
         archivos_list = [{
             "id": arch['id'],
             "nombre": arch['nombre_original'],
             "tipo": arch['tipo_archivo'],
             "tamaño": arch['tamaño'],
-            "url": arch['archivo'],
+            "url": arch['url_archivo'],
             "created_at": arch['created_at']
         } for arch in archivos]
 
@@ -437,7 +440,7 @@ def update_tramite(request, pk):
                     "nombre": archivo_obj.nombre_original,
                     "tipo": archivo_obj.tipo_archivo,
                     "tamaño": archivo_obj.tamaño,
-                    "url": archivo_obj.archivo.url,
+                    "url": archivo_obj.url_archivo,
                     "created_at": archivo_obj.created_at.isoformat()
                 })
 
@@ -448,7 +451,7 @@ def update_tramite(request, pk):
             "nombre": arch.nombre_original,
             "tipo": arch.tipo_archivo,
             "tamaño": arch.tamaño,
-            "url": arch.archivo.url,
+            "url": arch.url_archivo,
             "created_at": arch.created_at.isoformat()
         } for arch in todos_archivos]
 
@@ -549,10 +552,9 @@ def delete_archivo(request, archivo_id):
         tramite_id = archivo.tramite_id
         nombre_archivo = archivo.nombre_original
 
-        # Eliminar el archivo físico del sistema
+        # Eliminar el archivo del storage (S3 o local)
         if archivo.archivo:
-            if os.path.exists(archivo.archivo.path):
-                os.remove(archivo.archivo.path)
+            archivo.archivo.delete(save=False)
 
         # Eliminar el registro de la base de datos
         archivo.delete()
@@ -690,7 +692,7 @@ def send_to_tracker(request, pk):
                 "nombre": arch.nombre_original,
                 "tipo": arch.tipo_archivo,
                 "tamaño": arch.tamaño,
-                "url": arch.archivo.url,
+                "url": arch.url_archivo,
                 "created_at": arch.created_at.isoformat()
             } for arch in archivos]
 

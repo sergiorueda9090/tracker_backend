@@ -273,6 +273,13 @@ class PreparacionArchivo(models.Model):
         help_text="Archivo PDF o imagen (PNG, JPG)"
     )
 
+    url_archivo = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="URL pública del archivo en S3"
+    )
+
     nombre_original = models.CharField(
         max_length=255,
         help_text="Nombre original del archivo"
@@ -305,6 +312,12 @@ class PreparacionArchivo(models.Model):
         indexes = [
             models.Index(fields=['tramite'], name='idx_prep_arch_tramite'),
         ]
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.archivo and not self.url_archivo:
+            self.url_archivo = self.archivo.url
+            super().save(update_fields=['url_archivo'])
 
     def __str__(self):
         return f"{self.nombre_original} - {self.tramite.placa}"
